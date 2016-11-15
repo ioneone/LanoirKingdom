@@ -1,0 +1,16 @@
+# event file
+# CHARACTER,name,position,direction,move_type,message
+# MOVE,x,y,map_chip_id,destination_map,destination_x,destination_y
+# BGM,file_name
+CHARACTER,king,4,4,7,9,0,0,I'm ling
+CHARACTER,minister,4,4,8,9,0,1,I'm minister
+CHARACTER,soldier,4,4,6,13,0,1,I'm soldier
+MOVE,7,15,3,test2,5,6
+MOVE,8,15,3,test2,6,6
+BGM,castle
+TREASURE,2,6,100 gold
+TREASURE,3,6,sword
+TREASURE,4,6,portion
+DOOR,3,8
+OBJECT,7,2,44
+OBJECT,8,2,44

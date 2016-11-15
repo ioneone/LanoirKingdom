@@ -1,0 +1,29 @@
+# CHARACTER,name,position,direction,move_type,message
+BGM,town
+CHARACTER,king,4,4,12,13,2,0,hello
+CHARACTER,minister,4,4,12,14,2,0,hello
+CHARACTER,middle_male1,4,4,4,17,2,0,hello
+CHARACTER,middle_female,4,4,4,20,2,0,this is the bed house
+CHARACTER,child_female2,4,4,18,10,1,0,hello, this is the item shop
+CHARACTER,middle_male2,4,4,21,14,0,0,this is the weapon shop
+CHARACTER,priest,4,4,19,2,0,0,this is the church
+MOVE,0,13,13,test2,7,8
+MOVE,0,14,13,test2,7,8
+MOVE,15,0,3,test2,7,8
+DOOR,7,18
+# tables
+OBJECT,17,10,41
+OBJECT,21,15,41
+OBJECT,21,21,41
+OBJECT,5,17,41
+OBJECT,5,20,41
+# bed house、weapon house、item house、church
+OBJECT,7,16,34
+OBJECT,17,16,35
+OBJECT,16,9,36
+OBJECT,16,6,38
+# chairs
+OBJECT,4,20,42
+OBJECT,6,20,42
+# bed
+OBJECT,9,20,43
