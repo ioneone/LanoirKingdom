@@ -10,7 +10,7 @@ TILE_SIZE = 32
 DOWN, LEFT, RIGHT, UP = 0, 1, 2, 3  # in the order of the image
 STOP, AUTO_MOVE, INPUT_MOVE = 0, 1, 2
 AUTO_MOVE_RATE = 0.05  # how often NPC moves
-ENCOUNTER_RATE = 0.5  # how often the player encounter a monster
+ENCOUNTER_RATE = 0.05  # how often the player encounter a monster
 
 TITLE, FILED, TALK, COMMAND, BATTLE_INIT, BATTLE_COMMAND, BATTLE_PROCESS, STATUS = range(8)
 
@@ -342,14 +342,37 @@ class pyRPG:
                     and not self.player_status_window.points_distribution_flag:
                 sounds["pi"].play()
                 self.player_status_window.selection = self.player_status_window.STATUS_WINDOW
+            elif self.player_status_window.points_distribution_flag and self.player_status_window.selection \
+                    == self.player_status_window.STATUS_WINDOW:
+                if self.player_status_window.status_after[self.player_status_window.status_cursor_position] - 1 \
+                        >= self.player_status_window.status_before[self.player_status_window.status_cursor_position]:
+                    sounds["pi"].play()
+                    self.player_status_window.status_after[self.player_status_window.status_cursor_position] -= 1
+                    self.player_status_window.selected_player.status_points += 1
         elif event.type == KEYDOWN and event.key == K_RIGHT:
             if not self.player_status_window.selection == self.player_status_window.SKILLS_WINDOW \
                     and not self.player_status_window.points_distribution_flag:
                 sounds["pi"].play()
                 self.player_status_window.selection = self.player_status_window.SKILLS_WINDOW
+            elif self.player_status_window.points_distribution_flag and self.player_status_window.selection \
+                    == self.player_status_window.STATUS_WINDOW:
+                if self.player_status_window.selected_player.status_points > 0:
+                    sounds["pi"].play()
+                    self.player_status_window.status_after[self.player_status_window.status_cursor_position] += 1
+                    self.player_status_window.selected_player.status_points -= 1
         elif event.type == KEYDOWN and event.key == K_SPACE:
             sounds["pi"].play()
-            self.player_status_window.points_distribution_flag = True
+            if self.player_status_window.points_distribution_flag:
+                # hp, atk, int, de, mgr, agi, cri, exe
+                self.player_status_window.selected_player.health = self.player_status_window.status_after[0]
+                self.player_status_window.selected_player.attack = self.player_status_window.status_after[1]
+                self.player_status_window.selected_player.intelligence = self.player_status_window.status_after[2]
+                self.player_status_window.selected_player.defence = self.player_status_window.status_after[3]
+                self.player_status_window.selected_player.magic_resistance = self.player_status_window.status_after[4]
+                self.player_status_window.selected_player.agility = self.player_status_window.status_after[5]
+                self.player_status_window.selected_player.critical_hit = self.player_status_window.status_after[6]
+                self.player_status_window.selected_player.experience = self.player_status_window.status_after[7]
+            self.player_status_window.points_distribution_flag = not self.player_status_window.points_distribution_flag
         elif event.type == KEYDOWN and event.key == K_UP:
             if self.player_status_window.points_distribution_flag:
                 if not self.player_status_window.status_cursor_position - 1 < 0:
@@ -421,6 +444,7 @@ class pyRPG:
         file.close()
 
     def load_enemy_batch(self, directory, file_name):
+        # id, name, health, attack, intelligence, defence, magic_resistance, agility, critical_hit, experience
         file_path = os.path.join(directory, file_name)
         file = open(file_path)
         for line in file:
@@ -428,14 +452,26 @@ class pyRPG:
             if line.startswith('#'):
                 continue
             data = line.split(",")
-            name = data[0]
-            Battle.images.append(load_image("enemybatch", name+".png"))
+            id = data[0]
+            name = data[1]
+            health = data[2]
+            attack = data[3]
+            intelligence = data[4]
+            defence = data[5]
+            magic_resistance = data[6]
+            agility = data[7]
+            critical_hit = data[8]
+            experience = data[9]
+            Map.enemy_batch.append(Enemy(id, name, health, attack, intelligence, defence, magic_resistance, agility, critical_hit, experience))
         file.close()
 
 
 class Map:
+
     images = []
     movable_type = []
+
+    enemy_batch = []
 
     default = 1  # default map chip id
 
@@ -445,6 +481,7 @@ class Map:
         self.column = 0
         self.map = []
         self.characters = []
+        self.enemies = []
         self.events = []
         self.bgm_file_path = None
         self.party = party
@@ -454,12 +491,10 @@ class Map:
     def create(self, directory, destination_map):
         self.name = destination_map
         self.characters = []
+        self.enemies = []
         self.events = []
         self.load(directory)
         self.load_event(directory)
-
-    def add_character(self, character):
-        self.characters.append(character)
 
     def input(self):
         for character in self.characters:
@@ -529,6 +564,8 @@ class Map:
                 self.create_door_event(data)
             elif event_type == "OBJECT":
                 self.create_object_event(data)
+            elif event_type == "Enemy":
+                self.create_enemy(data)
         file.close()
 
     def play_bgm(self, data=None):
@@ -576,6 +613,13 @@ class Map:
         message = data[8]
         character = Character(name, row, column, (x, y), direction, move_type, message)
         self.characters.append(character)
+
+    def create_enemy(self, data):
+        id = int(data[1])
+        level = int(data[2])
+        enemy = self.enemy_batch[id]
+        enemy.set_level(level)
+        self.enemies.append(enemy)
 
     def get_character(self, x, y):
         for character in self.characters:
@@ -705,7 +749,7 @@ class Player(Character):
                 if map.name == "test2" and random.random() < ENCOUNTER_RATE:
                     global game_state
                     game_state = BATTLE_INIT
-                    battle.start()
+                    battle.start(map)
 
             else:
                 return
@@ -1179,27 +1223,33 @@ class Battle:
         self.battle_status_windows.append(BattleStatusWindow(Rect(450, 8, 104, 136), status[3], self.message_engine))
 
         self.background_image = load_image("data", "grass.png")
-        self.monster_image = None
+        self.enemy = None
 
-    def start(self):
+    def start(self, map):
         self.command_window.hide()
         for battle_status_window in self.battle_status_windows:
             battle_status_window.hide()
 
         self.message_window.set_message("encounter an enemy")
         self.play_bgm()
-        self.monster_image = self.images[random.randrange(len(self.images))]
+
+        self.enemy = map.enemies[random.randrange(len(map.enemies))]
 
     def update(self):
         pass
 
     def draw(self, screen):
         screen.blit(self.background_image, (0, 0))
-        center_rect = self.monster_image.get_rect(center=SCREEN_RECT.center)
-        screen.blit(self.monster_image, center_rect)
+        center_rect = self.enemy.image.get_rect(center=SCREEN_RECT.center)
+        screen.blit(self.enemy.image, center_rect)
         self.command_window.draw(screen)
         for battle_status_window in self.battle_status_windows:
             battle_status_window.draw(screen)
+
+        # test
+        image = load_image("skilleffect", "attack1.png")
+        screen.blit(image, (0, 0))
+
 
     def play_bgm(self):
         bgm_file_name = "battle.ogg"
@@ -1266,6 +1316,8 @@ class Class(Player):
     # Author: Junhong Wang
     # Date: 2016/11/10
     # Description: parameters for players
+
+
     def __init__(self, name, row, column, position, direction, is_leader, party,
                  health, attack, intelligence, defence, magic_resistance, agility, critical_hit):
         Player.__init__(self, name, row, column, position, direction, is_leader, party)
@@ -1282,7 +1334,7 @@ class Class(Player):
 
         self.level = 1
         self.experience = 0
-        self.status_points = 0
+        self.status_points = 5
         self.skill_points = 0
 
         # equipments
@@ -1414,9 +1466,12 @@ class Enemy:
     # Author: Junhong Wang
     # Date: 2016/11/11
     # Description: parameters for enemy
-    def __init__(self, name, health, attack, intelligence, defence, magic_resistance, agility, critical_hit, experience):
+
+    def __init__(self, id, name,
+                 health, attack, intelligence, defence, magic_resistance, agility, critical_hit, experience):
+        self.id = id
         self.name = name
-        self.image = load_image("enemybatch", self.name)
+        self.image = load_image("enemybatch", name+".png")
         self.health = health
         self.attack = attack
         self.intelligence = intelligence
@@ -1425,6 +1480,18 @@ class Enemy:
         self.agility = agility
         self.critical_hit = critical_hit
         self.experience = experience
+        self.level = 1
+
+    def set_level(self, level):
+        self.level = level
+        self.health *= level
+        self.attack *= level
+        self.intelligence *= level
+        self.defence *= level
+        self.magic_resistance *= level
+        self.agility *= level
+        self.critical_hit *= level
+        self.experience *= level
 
 
 class PlayerStatusWindow(Window):
@@ -1468,6 +1535,9 @@ class PlayerStatusWindow(Window):
         self.cursor_right_image = load_image("data", "cursor_right.png")
         self.status_cursor_image = load_image("data", "status_cursor.png")
 
+        self.selected_player = self.party.members[self.page]
+        self.status_before = []
+        self.status_after = []
         self.status_images = []
         self.status_images.append(load_image("itemicon", "hp.png"))
         self.status_images.append(load_image("itemicon", "atk.png"))
@@ -1508,11 +1578,23 @@ class PlayerStatusWindow(Window):
         # prepare
         self.message_engine.set_color(BLACK)
 
-        selected_player = self.party.members[self.page]
-        selected_player.update()
-        status = [selected_player.health, selected_player.attack, selected_player.intelligence,
-                  selected_player.defence, selected_player.magic_resistance, selected_player.agility,
-                  selected_player.critical_hit, selected_player.experience]
+        if not self.points_distribution_flag:
+            selected_player = self.party.members[self.page]
+            self.selected_player = selected_player
+            hp = selected_player.health
+            atk = selected_player.attack
+            int = selected_player.intelligence
+            de = selected_player.defence
+            mgr = selected_player.magic_resistance
+            agi = selected_player.agility
+            cri = selected_player.critical_hit
+            exe = selected_player.experience
+            self.status_before = [selected_player.health, selected_player.attack, selected_player.intelligence,
+                    selected_player.defence, selected_player.magic_resistance, selected_player.agility,
+                    selected_player.critical_hit, selected_player.experience]
+            self.status_after = [hp, atk, int, de, mgr, agi, cri, exe]
+
+        self.selected_player.update()
 
         # background
         screen.blit(self.background_image, (0, 0))
@@ -1524,8 +1606,8 @@ class PlayerStatusWindow(Window):
         if not self.page == len(self.party.members) - 1:
             screen.blit(self.cursor_right_image, (0.95*self.rect.width-self.cursor_right_image.get_width(), offset_y))
 
-        class_name = str(type(selected_player))[17:-2]
-        self.message_engine.draw_center(screen, selected_player.name + " ( " + class_name + " )", self.top_rect)
+        class_name = str(type(self.selected_player))[17:-2]
+        self.message_engine.draw_center(screen, self.selected_player.name + " ( " + class_name + " )", self.top_rect)
 
         # status_window / skills_window
         trans_white_color = (WHITE[0], WHITE[1], WHITE[2], self.alpha)
@@ -1584,7 +1666,7 @@ class PlayerStatusWindow(Window):
         # text on status_window
         dx = self.status_points_rect.left
         dy = self.status_points_rect.top
-        self.message_engine.draw(screen, " STATUS"+"       "+str(selected_player.status_points)+"pt", (dx, dy))
+        self.message_engine.draw(screen, " STATUS"+"       "+str(self.selected_player.status_points)+"pt", (dx, dy))
 
         offset_y = self.rect.height * 0.03
         for i in range(0, len(self.STATUS)):
@@ -1592,11 +1674,11 @@ class PlayerStatusWindow(Window):
             dy = self.status_points_rect.top + offset_y + (self.message_engine.font_height+self.LINE_HEIGHT) * (i+1)
             if self.STATUS[i] == "HP":
                 screen.blit(self.status_images[i], (dx, dy))
-                self.message_engine.draw(screen, self.STATUS[i] + "        " + str(status[i]), (dx+self.status_images[i].get_rect().width, dy))
+                self.message_engine.draw(screen, self.STATUS[i] + "        " + str(self.status_after[i]), (dx+self.status_images[i].get_rect().width, dy))
             else:
                 screen.blit(self.status_images[i], (dx, dy))
-                self.message_engine.draw(screen, self.STATUS[i]+"       "+str(status[i]), (dx+self.status_images[i].get_rect().width, dy))
-        screen.blit(selected_player.image, (0.45*self.rect.width+0.5*TILE_SIZE, 0.15*self.rect.height+0.5*TILE_SIZE))
+                self.message_engine.draw(screen, self.STATUS[i]+"       "+str(self.status_after[i]), (dx+self.status_images[i].get_rect().width, dy))
+        screen.blit(self.selected_player.image, (0.45*self.rect.width+0.5*TILE_SIZE, 0.15*self.rect.height+0.5*TILE_SIZE))
 
         # text on level_rect
         dx = self.level_rect.left
@@ -1604,7 +1686,7 @@ class PlayerStatusWindow(Window):
         self.message_engine.draw(screen, "LEVEL", (dx, dy))
         dx = self.level_rect.centerx - self.message_engine.font_width*0.5
         dy = self.level_rect.centery
-        self.message_engine.draw(screen, str(selected_player.level), (dx, dy))
+        self.message_engine.draw(screen, str(self.selected_player.level), (dx, dy))
 
         # text on experience_rect
         dx = self.experience_rect.left
@@ -1613,7 +1695,7 @@ class PlayerStatusWindow(Window):
         self.message_engine.draw(screen, "NEXT",
                                  (dx+0.5*self.message_engine.font_width, dy+self.message_engine.font_height))
         dx = self.experience_rect.centerx
-        self.message_engine.draw(screen, str(selected_player.experience),
+        self.message_engine.draw(screen, str(self.selected_player.experience),
                                  (dx-self.message_engine.font_width*0.5, dy+self.message_engine.font_height*2))
 
         # text on skills_window
@@ -1621,16 +1703,16 @@ class PlayerStatusWindow(Window):
         dy = self.skill_points_rect.top
         offset_y = self.rect.height * 0.03
         offset_x = self.rect.width * 0.25
-        self.message_engine.draw(screen, " SKILLS"+"       "+str(selected_player.skill_points)+"pt", (dx, dy))
+        self.message_engine.draw(screen, " SKILLS"+"       "+str(self.selected_player.skill_points)+"pt", (dx, dy))
         for i in range(0, 4):
-            name = selected_player.skills[i].name
+            name = self.selected_player.skills[i].name
             name_list = name.split()
             name_shortened = ""
             for word in name_list:
                 name_shortened += word[:1]
             self.message_engine.draw(screen, " "+name_shortened,
                                      (dx, dy+offset_y+(self.message_engine.font_height+self.LINE_HEIGHT)*(i+1)))
-            self.message_engine.draw(screen, str(selected_player.skills[i].level), (dx+offset_x, dy+offset_y+(self.message_engine.font_height+self.LINE_HEIGHT)*(i+1)))
+            self.message_engine.draw(screen, str(self.selected_player.skills[i].level), (dx+offset_x, dy+offset_y+(self.message_engine.font_height+self.LINE_HEIGHT)*(i+1)))
 
         # text on text_rect
         dx = self.text_inner_rect.left
@@ -1646,7 +1728,6 @@ class PlayerStatusWindow(Window):
                 description = selected_skill.description
                 self.message_engine.draw(screen, name, (dx, dy))
                 self.message_engine.draw(screen, description, (dx, dy+self.message_engine.font_height+self.LINE_HEIGHT))
-
 
         # finish drawing
         # self.message_engine.set_color(WHITE)
