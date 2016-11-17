@@ -373,6 +373,7 @@ class pyRPG:
                 self.player_status_window.selected_player.critical_hit = self.player_status_window.status_after[6]
                 self.player_status_window.selected_player.experience = self.player_status_window.status_after[7]
             self.player_status_window.points_distribution_flag = not self.player_status_window.points_distribution_flag
+            self.player_status_window.status_cursor_position = 0
         elif event.type == KEYDOWN and event.key == K_UP:
             if self.player_status_window.points_distribution_flag:
                 if not self.player_status_window.status_cursor_position - 1 < 0:
