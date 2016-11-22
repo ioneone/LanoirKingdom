@@ -1,8 +1,8 @@
 # id, name, health, attack, intelligence, defence, magic_resistance, agility, critical_hit, experience
-0,Assassin,10,10,10,10,10,10,10,10
+0,Assassin,5,6,1,2,1,5,4,4,2
 1,Asura,10,10,10,10,10,10,10,10
 2,Bandit,10,10,10,10,10,10,10,10
-3,Bat,10,10,10,10,10,10,10,10
+3,Bat,5,5,3,10,10,10,10,10
 4,Behemoth,10,10,10,10,10,10,10,10
 5,Captain,10,10,10,10,10,10,10,10
 6,Chimera,10,10,10,10,10,10,10,10

@@ -4,6 +4,7 @@
 # MOVE,x,y,map_chip_id,destination_map,destination_x,destination_y
 # BGM,file_name
 # Enemy,id,level
+# CLERK,name,row,column,position,direction,move_type,message,shop_name
 
 CHARACTER,king,4,4,2,1,0,0,I'm ling
 CHARACTER,minister,4,4,3,1,0,1,I'm minister

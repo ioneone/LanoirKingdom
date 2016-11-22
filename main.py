@@ -12,7 +12,7 @@ STOP, AUTO_MOVE, INPUT_MOVE = 0, 1, 2
 AUTO_MOVE_RATE = 0.05  # how often NPC moves
 ENCOUNTER_RATE = 0.05  # how often the player encounter a monster
 
-TITLE, FILED, TALK, COMMAND, BATTLE_INIT, BATTLE_COMMAND, BATTLE_PROCESS, STATUS = range(8)
+TITLE, FILED, TALK, COMMAND, BATTLE_INIT, BATTLE_COMMAND, BATTLE_PROCESS, STATUS, SHOP = range(9)
 
 BLUE = (0, 0, 255)
 WHITE = (255, 255, 255)
@@ -20,6 +20,7 @@ BLACK = (0, 0, 0)
 RED = (255, 0, 0)
 ORANGE = (243, 152, 0)
 DARK_GREEN = (87, 144, 151)
+LIGHT_BLUE = (17, 248, 216)
 
 full_screen_flag = False
 
@@ -50,6 +51,7 @@ class pyRPG:
         self.load_character_chips("data", "charachip.dat")
         self.load_map_chips("data", "mapchip.dat")
         self.load_enemy_batch("data", "enemybatch.dat")
+        self.load_items("data", "itemicon.dat")
 
         self.party = Party()
         player1 = Knight("swordman_female", 4, 4, (3, 5), DOWN, True, self.party)
@@ -66,6 +68,7 @@ class pyRPG:
         self.message_window = MessageWindow(Rect(140, 334, 360, 140), self.message_engine)
         self.command_window = CommandWindow(Rect(16, 16, 300, 160), self.message_engine)
         self.player_status_window = PlayerStatusWindow(SCREEN_RECT, self.party, self.message_engine)
+        self.shop_window = ShopWindow(SCREEN_RECT)
 
         self.title = Title(self.message_engine)
 
@@ -126,6 +129,8 @@ class pyRPG:
             self.message_window.draw(self.screen)
         elif game_state == STATUS:
             self.player_status_window.draw(self.screen)
+        elif game_state == SHOP:
+            self.shop_window.draw(self.screen)
 
     def check_event(self):
         for event in pygame.event.get():
@@ -155,6 +160,14 @@ class pyRPG:
                 self.battle_process_handler(event)
             elif game_state == STATUS:
                 self.player_status_window_handler(event)
+            elif game_state == SHOP:
+                self.shop_window_handler(event)
+
+    def shop_window_handler(self, event):
+        global game_state
+        if event.type == KEYDOWN and event.key == K_q:
+            sounds["pi"].play()
+            game_state = FILED
 
     def battle_command_handler(self, event):
         global game_state
@@ -260,8 +273,12 @@ class pyRPG:
                     self.command_window.hide()
                     character = player.talk(self.map)
                     if character:
-                        self.message_window.set_message(character.message)
-                        game_state = TALK
+                        if isinstance(character, Clerk):
+                            self.shop_window.set_clerk(character)
+                            game_state = SHOP
+                        else:
+                            self.message_window.set_message(character.message)
+                            game_state = TALK
                     else:
                         self.message_window.set_message("There's no one there")
                         game_state = TALK
@@ -403,6 +420,29 @@ class pyRPG:
         self.message_engine.draw(self.screen, player.name.upper(), (450, 40))
         player_position_info = str(player.x) + ' ' + str(player.y)
         self.message_engine.draw(self.screen, player_position_info, (450, 70))
+
+    def load_items(self, directory, file_name):
+        # Author: Junhong Wang
+        # Date: 11/19/2016
+        # Description: load items and store them in Shop class
+        file_path = os.path.join(directory, file_name)
+        file = open(file_path)
+        for line in file:
+            line = line.rstrip()
+            if line.startswith("#"):
+                continue
+            data = line.split(",")
+            item_id = int(data[0])
+            item_name = data[1]
+            item_class = data[2]
+            item_power = data[3]
+            item_price = data[4]
+            item_description = data[5]
+            if item_class == "Sword":
+                Shop.items.append(Sword(item_name, item_description, item_price, item_power))
+            elif item_class == "Axe":
+                Shop.items.append(Axe(item_name, item_description, item_price, item_power))
+        file.close()
 
     def load_sounds(self, directory):
         sound_file_name_list = os.listdir(directory)
@@ -567,6 +607,8 @@ class Map:
                 self.create_object_event(data)
             elif event_type == "Enemy":
                 self.create_enemy(data)
+            elif event_type == "CLERK":
+                self.create_clerk_event(data)
         file.close()
 
     def play_bgm(self, data=None):
@@ -614,6 +656,17 @@ class Map:
         message = data[8]
         character = Character(name, row, column, (x, y), direction, move_type, message)
         self.characters.append(character)
+
+    def create_clerk_event(self, data):
+        name = data[1]
+        row, column = int(data[2]), int(data[3])
+        x, y = int(data[4]), int(data[5])
+        direction = int(data[6])
+        move_type = int(data[7])
+        message = data[8]
+        shop = Shop(data[9])
+        clerk = Clerk(name, row, column, (x, y), direction, move_type, message, shop)
+        self.characters.append(clerk)
 
     def create_enemy(self, data):
         id = int(data[1])
@@ -1670,15 +1723,28 @@ class PlayerStatusWindow(Window):
         self.message_engine.draw(screen, " STATUS"+"       "+str(self.selected_player.status_points)+"pt", (dx, dy))
 
         offset_y = self.rect.height * 0.03
+        offset_x = self.status_points_rect.width * 0.5
+        cursor_offset = offset_x * 0.5
         for i in range(0, len(self.STATUS)):
             dx = self.status_points_rect.left
             dy = self.status_points_rect.top + offset_y + (self.message_engine.font_height+self.LINE_HEIGHT) * (i+1)
-            if self.STATUS[i] == "HP":
-                screen.blit(self.status_images[i], (dx, dy))
-                self.message_engine.draw(screen, self.STATUS[i] + "        " + str(self.status_after[i]), (dx+self.status_images[i].get_rect().width, dy))
+            screen.blit(self.status_images[i], (dx, dy))
+            self.message_engine.draw(screen, self.STATUS[i], (dx+self.status_images[i].get_rect().width, dy))
+            if self.points_distribution_flag and self.selected_player.status_points:
+                if i == self.status_cursor_position:
+                    screen.blit(self.cursor_right_image, (dx+self.status_images[i].get_rect().width+offset_x+cursor_offset, dy))
+            if self.status_after[i] != self.status_before[i]:
+                if i == self.status_cursor_position:
+                    screen.blit(self.cursor_left_image,
+                                (dx + self.status_images[i].get_rect().width + offset_x - cursor_offset, dy))
+                self.message_engine.set_color(RED)
+                self.message_engine.draw(screen, str(self.status_after[i]),
+                                         (dx+self.status_images[i].get_rect().width+offset_x, dy))
+                self.message_engine.set_color(BLACK)
             else:
-                screen.blit(self.status_images[i], (dx, dy))
-                self.message_engine.draw(screen, self.STATUS[i]+"       "+str(self.status_after[i]), (dx+self.status_images[i].get_rect().width, dy))
+                self.message_engine.draw(screen, str(self.status_after[i]),
+                                         (dx + self.status_images[i].get_rect().width + offset_x, dy))
+
         screen.blit(self.selected_player.image, (0.45*self.rect.width+0.5*TILE_SIZE, 0.15*self.rect.height+0.5*TILE_SIZE))
 
         # text on level_rect
@@ -1739,13 +1805,142 @@ class Skill:
     def __init__(self, name, description, bonus_power, bonus_rate):
         self.name = name
         self.description = description
+        # addition to player power
         self.bonus_power = bonus_power
+        # multiplication with player power
         self.bonus_rate = bonus_rate
 
         self.level = 0
 
     def draw(self):
         pass
+
+
+class Item:
+    # Author: Junhong Wang
+    # Date: 2016/11/19
+    # Description: none
+    def __init__(self, name, description, price):
+        self.name = name
+        self.description = description
+        self.image = load_image("itemicon", name+".png")
+
+
+class Sword(Item):
+
+    def __init__(self, name, description, price, attack):
+        Item.__init__(self, name, description, price)
+        self.attack = attack
+
+
+class Armor(Item):
+    def __init__(self, name, description, price, defence):
+        Item.__init__(self, name, description, price)
+        self.defence = defence
+
+
+class Axe(Item):
+
+    def __init__(self, name, description, price, attack):
+        Item.__init__(self, name, description, price)
+        self.attack = attack
+
+
+class Lance(Item):
+
+    def __init__(self, name, description, price, attack):
+        Item.__init__(self, name, description, price)
+        self.attack = attack
+
+
+class Cane(Item):
+
+    def __init__(self, name, description, price, intelligence):
+        Item.__init__(self, name, description, price)
+        self.intelligence = intelligence
+
+
+class Helmet(Item):
+
+    def __init__(self, name, description, price, defence):
+        Item.__init__(self, name, description, price)
+        self.defence = defence
+
+
+class Shoes(Item):
+
+    def __init__(self, name, description, price, defence):
+        Item.__init__(self, name, description, price)
+        self.defence = defence
+
+
+class Gloves(Item):
+
+    def __init__(self, name, description, price, defence):
+        Item.__init__(self, name, description, price)
+        self.defence = defence
+
+
+class Accessory(Item):
+
+    def __init__(self, name, description, price, defence):
+        Item.__init__(self, name, description, price)
+        self.defence = defence
+
+
+class Shop:
+
+    items = []
+
+    def __init__(self, name):
+        self.name = name
+        self.items_on_sale = []
+        self.load()
+
+    def load(self):
+        file_path = os.path.join("data", self.name+".shop")
+        file = open(file_path)
+        for line in file:
+            line = line.rstrip()
+            if line.startswith("#"):
+                continue
+            data = line.split(",")
+            for id in data:
+                self.items_on_sale.append(Shop.items[int(id)])
+        file.close()
+
+
+class Clerk(Character):
+
+    def __init__(self, name, row, column, position, direction, move_type, message, shop):
+        Character.__init__(self, name, row, column, position, direction, move_type, message)
+        self.shop = shop
+
+
+class ShopWindow(Window):
+    # Author: Junhong Wang
+    # Date: 2016/11/19
+    # Description: Player can buy item at a shop when talking with a clerk
+
+    def __init__(self, rect):
+        Window.__init__(self, rect)
+        self.clerk = None
+        self.inventory_image = load_image("data", "inventory.png")
+        self.shop_shelf_image = load_image("data", "shopshelf.png")
+        self.shop_background_image = load_image("data", "shop_background.png")
+        self.text_rect = Rect(0.05 * rect.width, 0.75 * rect.height, 0.9 * rect.width, 0.2 * rect.height)
+        self.text_inner_rect = self.text_rect.inflate(-8, -8)
+
+    def set_clerk(self, clerk):
+        self.clerk = clerk
+        self.show()
+
+    def draw(self, screen):
+        screen.blit(self.shop_background_image, (0, 0))
+        screen.blit(self.inventory_image, (0, 0))
+        screen.blit(self.shop_shelf_image, (SCREEN_RECT.width*0.7, 0))
+        pygame.draw.rect(screen, WHITE, self.text_rect, 0)
+        pygame.draw.rect(screen, BLACK, self.text_inner_rect, 0)
 
 
 if __name__ == "__main__":

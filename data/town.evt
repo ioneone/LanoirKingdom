@@ -1,11 +1,13 @@
 # CHARACTER,name,position,direction,move_type,message
+# CLERK,name,row,column,position,direction,move_type,message,shop_name
+# OBJECT,x,y,map_chip_id
 BGM,town
 CHARACTER,king,4,4,12,13,2,0,hello
 CHARACTER,minister,4,4,12,14,2,0,hello
 CHARACTER,middle_male1,4,4,4,17,2,0,hello
 CHARACTER,middle_female,4,4,4,20,2,0,this is the bed house
 CHARACTER,child_female2,4,4,18,10,1,0,hello, this is the item shop
-CHARACTER,middle_male2,4,4,21,14,0,0,this is the weapon shop
+CLERK,middle_male2,4,4,21,14,0,0,this is the weapon shop,wpshop
 CHARACTER,priest,4,4,19,2,0,0,this is the church
 MOVE,0,13,13,test2,7,8
 MOVE,0,14,13,test2,7,8

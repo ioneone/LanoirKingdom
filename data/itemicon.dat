@@ -1,0 +1,6 @@
+# id, name, type, power, price, description
+0,iron_sword,Sword,3,100,iron sword
+1,brond_sword,Sword,5,200,brond sword
+2,gold_Sword,Sword,7,300,gold sword
+3,iron_axe,Axe,5,150,iron axe
+4,silver_axe,Axe,10,500,silver axe
