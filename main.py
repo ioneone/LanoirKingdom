@@ -10,9 +10,11 @@ TILE_SIZE = 32
 DOWN, LEFT, RIGHT, UP = 0, 1, 2, 3  # in the order of the image
 STOP, AUTO_MOVE, INPUT_MOVE = 0, 1, 2
 AUTO_MOVE_RATE = 0.05  # how often NPC moves
-ENCOUNTER_RATE = 0.05  # how often the player encounter a monster
+ENCOUNTER_RATE = 0.5  # how often the player encounter a monster
 
-TITLE, FILED, TALK, COMMAND, BATTLE_INIT, BATTLE_COMMAND, BATTLE_PROCESS, STATUS, SHOP = range(9)
+SKILL_EFFECT_SIZE = 192
+
+TITLE, FILED, TALK, COMMAND, BATTLE_INIT, BATTLE_COMMAND, BATTLE_PROCESS, STATUS, SHOP, ITEM = range(10)
 
 BLUE = (0, 0, 255)
 WHITE = (255, 255, 255)
@@ -27,6 +29,70 @@ full_screen_flag = False
 sounds = {}  # { name: sound file }
 
 game_state = TITLE
+
+
+def load_image(directory, filename):
+    file_path = os.path.join(directory, filename)
+    try:
+        image = pygame.image.load(file_path).convert_alpha()
+    except pygame.error:
+        print("Cannot find image", file_path)
+        image = None
+    return image
+
+
+def split_image(image, size):
+    image_list = []
+    width = image.get_rect().width
+    height = image.get_rect().height
+    row = int(height / size)
+    column = int(width / size)
+    for r in range(0, row*size, size):
+        for c in range(0, column*size, size):
+            trimmed_image = pygame.Surface((size, size), pygame.SRCALPHA, 32)
+            trimmed_image.blit(image, (0, 0), (c, r, size, size))
+            #  The optional flags argument can be set to pygame.RLEACCEL
+            #  to provide better performance on non accelerated displays
+            #  choose the pixel color at top-left to be transparent
+            # trimmed_image.set_colorkey(trimmed_image.get_at((0, 0)), RLEACCEL)
+            #  make the image editable
+            trimmed_image.convert()
+            image_list.append(trimmed_image)
+    return image_list
+
+
+def blend_image(image1, image2, blend_factor):
+    # image1 and image2 are the same size
+    # blend image2 on image1
+    width = image1.get_rect().width
+    height = image1.get_rect().height
+    surface1 = pygame.Surface((width, height), pygame.SRCALPHA, 32)
+    surface1.blit(image1, (0, 0))
+    surface2 = pygame.Surface((width, height), pygame.SRCALPHA, 32)
+    surface2.blit(image2, (0, 0))
+    blend_alpha = int(255 * blend_factor)
+    for h in range(height):
+        for w in range(width):
+            color1 = surface1.get_at((w, h))
+            color2 = surface2.get_at((w, h))
+
+            r = color1[0]*(1-blend_factor)+color2[0]*blend_factor
+            if r > 255:
+                r = 255
+            g = color1[1]*(1-blend_factor)+color2[1]*blend_factor
+            if g > 255:
+                g = 255
+            b = color1[2]*(1-blend_factor)+color2[2]*blend_factor
+            if b > 255:
+                b = 255
+            a = color1[3]*(1-blend_factor)+color2[3]*blend_factor
+            if a > 255:
+                a = 255
+            color = (r, g, b, a)
+            # print(color)
+            surface1.set_at((w, h), color)
+
+    return surface1
 
 
 class pyRPG:
@@ -68,11 +134,12 @@ class pyRPG:
         self.message_window = MessageWindow(Rect(140, 334, 360, 140), self.message_engine)
         self.command_window = CommandWindow(Rect(16, 16, 300, 160), self.message_engine)
         self.player_status_window = PlayerStatusWindow(SCREEN_RECT, self.party, self.message_engine)
-        self.shop_window = ShopWindow(SCREEN_RECT)
+        self.shop_window = ShopWindow(SCREEN_RECT, self.message_engine)
+        self.item_window = ItemWindow(SCREEN_RECT, self.message_engine, self.party)
 
         self.title = Title(self.message_engine)
 
-        self.battle = Battle(self.message_window, self.message_engine)
+        self.battle = Battle(self.party, self.message_window, self.message_engine)
 
         global game_state
         game_state = TITLE
@@ -112,6 +179,10 @@ class pyRPG:
             self.message_window.update()
         elif game_state == STATUS:
             self.player_status_window.update()
+        elif game_state == SHOP:
+            self.shop_window.update()
+        elif game_state == ITEM:
+            self.item_window.update()
 
     def draw(self):
         global game_state
@@ -131,8 +202,10 @@ class pyRPG:
             self.player_status_window.draw(self.screen)
         elif game_state == SHOP:
             self.shop_window.draw(self.screen)
+        elif game_state == ITEM:
+            self.item_window.draw(self.screen)
 
-    def check_event(self):
+    def check_event(self):  # input
         for event in pygame.event.get():
             if event.type == QUIT:
                 pygame.quit()
@@ -162,12 +235,441 @@ class pyRPG:
                 self.player_status_window_handler(event)
             elif game_state == SHOP:
                 self.shop_window_handler(event)
+            elif game_state == ITEM:
+                self.item_window_handler(event)
+
+    def item_window_handler(self, event):
+        global game_state
+        if event.type == KEYDOWN and event.key == K_q:
+            sounds["pi"].play()
+            # reset everything
+            self.item_window.cursor_position = 0
+            self.item_window.cursor_is_in = self.item_window.INVENTORY_RECT
+            self.item_window.is_grabbing = False
+            if self.item_window.selected_item:
+                Player.inventory[self.item_window.selected_item_position] = self.item_window.selected_item
+                self.item_window.selected_item = None
+                self.item_window.selected_item_position = None
+            game_state = FILED
+        if event.type == KEYDOWN and event.key == K_LEFT:
+            if self.item_window.cursor_is_in == self.item_window.INVENTORY_RECT:
+                sounds["pi"].play()
+                if self.item_window.cursor_position == 0:
+                    self.item_window.cursor_is_in = self.item_window.BAG_RECT
+                    self.item_window.cursor_position = 4
+                elif self.item_window.cursor_position == 5:
+                    self.item_window.cursor_is_in = self.item_window.EQUIPMENT_RECT
+                    self.item_window.cursor_position = 1
+                elif self.item_window.cursor_position == 10 or self.item_window.cursor_position == 15:
+                    self.item_window.cursor_is_in = self.item_window.EQUIPMENT_RECT
+                    self.item_window.cursor_position = 3
+                elif self.item_window.cursor_position == 20:
+                    self.item_window.cursor_is_in = self.item_window.EQUIPMENT_RECT
+                    self.item_window.cursor_position = 5
+                else:
+                    self.item_window.cursor_position -= 1
+            elif self.item_window.cursor_is_in == self.item_window.DROP_RECT:
+                sounds["pi"].play()
+                self.item_window.cursor_is_in = self.item_window.INVENTORY_RECT
+                self.item_window.cursor_position = 24
+            elif self.item_window.cursor_is_in == self.item_window.BAG_RECT:
+                if not self.item_window.cursor_position == 0:
+                    sounds["pi"].play()
+                    self.item_window.cursor_position -= 1
+            elif self.item_window.cursor_is_in == self.item_window.EQUIPMENT_RECT:
+                if self.item_window.cursor_position == 1 \
+                        or self.item_window.cursor_position == 3 \
+                        or self.item_window.cursor_position == 5:
+                    sounds["pi"].play()
+                    self.item_window.cursor_position -= 1
+
+        elif event.type == KEYDOWN and event.key == K_RIGHT:
+            if self.item_window.cursor_is_in == self.item_window.INVENTORY_RECT:
+                if self.item_window.cursor_position == 4 \
+                        or self.item_window.cursor_position == 9 \
+                        or self.item_window.cursor_position == 14 \
+                        or self.item_window.cursor_position == 19 \
+                        or self.item_window.cursor_position == 24:
+                    self.item_window.cursor_is_in = self.item_window.DROP_RECT
+                    self.item_window.cursor_position = 0
+                else:
+                    self.item_window.cursor_position += 1
+                    sounds["pi"].play()
+            elif self.item_window.cursor_is_in == self.item_window.DROP_RECT:
+                pass
+            elif self.item_window.cursor_is_in == self.item_window.BAG_RECT:
+                if self.item_window.cursor_position == 4:
+                    self.item_window.cursor_is_in = self.item_window.INVENTORY_RECT
+                    self.item_window.cursor_position = 0
+                else:
+                    self.item_window.cursor_position += 1
+                sounds["pi"].play()
+            elif self.item_window.cursor_is_in == self.item_window.EQUIPMENT_RECT:
+                if self.item_window.cursor_position == 0 \
+                        or self.item_window.cursor_position == 2 \
+                        or self.item_window.cursor_position == 4:
+                    self.item_window.cursor_position += 1
+                elif self.item_window.cursor_position == 1:
+                    self.item_window.cursor_is_in = self.item_window.INVENTORY_RECT
+                    self.item_window.cursor_position = 5
+                elif self.item_window.cursor_position == 3:
+                    self.item_window.cursor_is_in = self.item_window.INVENTORY_RECT
+                    self.item_window.cursor_position = 10
+                elif self.item_window.cursor_position == 5:
+                    self.item_window.cursor_is_in = self.item_window.INVENTORY_RECT
+                    self.item_window.cursor_position = 20
+                sounds["pi"].play()
+
+        elif event.type == KEYDOWN and event.key == K_UP:
+            if self.item_window.cursor_is_in == self.item_window.INVENTORY_RECT:
+                if self.item_window.cursor_position - 5 >= 0:
+                    sounds["pi"].play()
+                    self.item_window.cursor_position -= 5
+            elif self.item_window.cursor_is_in == self.item_window.DROP_RECT:
+                pass
+            elif self.item_window.cursor_is_in == self.item_window.BAG_RECT:
+                pass
+            elif self.item_window.cursor_is_in == self.item_window.EQUIPMENT_RECT:
+                if self.item_window.cursor_position == 0:
+                    self.item_window.cursor_is_in = self.item_window.BAG_RECT
+                    self.item_window.cursor_position = 0
+                elif self.item_window.cursor_position == 1:
+                    self.item_window.cursor_is_in = self.item_window.BAG_RECT
+                    self.item_window.cursor_position = 4
+                else:
+                    self.item_window.cursor_position -= 2
+                sounds["pi"].play()
+
+        elif event.type == KEYDOWN and event.key == K_DOWN:
+            if self.item_window.cursor_is_in == self.item_window.INVENTORY_RECT:
+                if self.item_window.cursor_position + 5 < 25:
+                    sounds["pi"].play()
+                    self.item_window.cursor_position += 5
+            elif self.item_window.cursor_is_in == self.item_window.DROP_RECT:
+                pass
+            elif self.item_window.cursor_is_in == self.item_window.BAG_RECT:
+                if self.item_window.cursor_position == 0 or self.item_window.cursor_position == 1:
+                    sounds["pi"].play()
+                    self.item_window.cursor_is_in = self.item_window.EQUIPMENT_RECT
+                    self.item_window.cursor_position = 0
+                elif self.item_window.cursor_position == 3 or self.item_window.cursor_position == 4:
+                    sounds["pi"].play()
+                    self.item_window.cursor_is_in = self.item_window.EQUIPMENT_RECT
+                    self.item_window.cursor_position = 1
+            elif self.item_window.cursor_is_in == self.item_window.EQUIPMENT_RECT:
+                if self.item_window.cursor_position == 4:
+                    pass
+                elif self.item_window.cursor_position == 5:
+                    pass
+                else:
+                    sounds["pi"].play()
+                    self.item_window.cursor_position += 2
+
+        elif event.type == KEYDOWN and event.key == K_SPACE:
+            if self.item_window.cursor_is_in == self.item_window.INVENTORY_RECT:
+                if self.item_window.is_grabbing:
+                    if not Player.inventory[self.item_window.cursor_position]:
+                        Player.inventory[self.item_window.cursor_position] = self.item_window.selected_item
+                        self.item_window.selected_item = None
+                        self.item_window.selected_item_position = None
+                        self.item_window.selected_item_from = None
+                        self.item_window.is_grabbing = False
+                else:
+                    if Player.inventory[self.item_window.cursor_position]:
+                        self.item_window.selected_item = Player.inventory[self.item_window.cursor_position]
+                        self.item_window.selected_item_position = self.item_window.cursor_position
+                        self.item_window.selected_item_from = self.item_window.INVENTORY_RECT
+                        Player.inventory[self.item_window.cursor_position] = None
+                        self.item_window.is_grabbing = True
+            elif self.item_window.cursor_is_in == self.item_window.DROP_RECT:
+                if self.item_window.is_grabbing:
+                    self.item_window.selected_item = None
+                    self.item_window.selected_item_position = None
+                    self.item_window.selected_item_from = None
+                    self.item_window.is_grabbing = False
+
+            elif self.item_window.cursor_is_in == self.item_window.BAG_RECT:
+                if self.item_window.is_grabbing:
+                    if not self.item_window.selected_player.bag[self.item_window.cursor_position]:
+                        self.item_window.selected_player.bag[self.item_window.cursor_position] = self.item_window.selected_item
+                        self.item_window.selected_item = None
+                        self.item_window.selected_item_position = None
+                        self.item_window.selected_item_from = None
+                        self.item_window.is_grabbing = False
+                else:
+                    if self.item_window.selected_player.bag[self.item_window.cursor_position]:
+                        self.item_window.selected_item = self.item_window.selected_player.bag[self.item_window.cursor_position]
+                        self.item_window.selected_player.bag[self.item_window.cursor_position] = None
+                        self.item_window.selected_item_position = self.item_window.cursor_position
+                        self.item_window.selected_item_from = self.item_window.BAG_RECT
+                        self.item_window.is_grabbing = True
+
+            elif self.item_window.cursor_is_in == self.item_window.EQUIPMENT_RECT:
+
+                # # equipments
+                # self.weapon = None
+                # self.head = None
+                # self.body = None
+                # self.arms = None
+                # self.legs = None
+                # self.boots = None
+                # self.accessory = None
+
+                if self.item_window.cursor_position == 0:  # weapon
+                    if self.item_window.is_grabbing:
+                        if not self.item_window.selected_player.weapon:
+                            self.item_window.selected_player.weapon = self.item_window.selected_item
+                            self.item_window.selected_item = None
+                            self.item_window.selected_item_position = None
+                            self.item_window.selected_item_from = None
+                            self.item_window.is_grabbing = False
+                    else:
+                        if self.item_window.selected_player.weapon:
+                            self.item_window.selected_item = self.item_window.selected_player.weapon
+                            self.item_window.selected_player.weapon = None
+                            self.item_window.selected_item_position = self.item_window.cursor_position
+                            self.item_window.selected_item_from = self.item_window.EQUIPMENT_RECT
+                            self.item_window.is_grabbing = True
+
+                elif self.item_window.cursor_position == 1:  # head
+                    if self.item_window.is_grabbing:
+                        if not self.item_window.selected_player.head:
+                            self.item_window.selected_player.head = self.item_window.selected_item
+                            self.item_window.selected_item = None
+                            self.item_window.selected_item_position = None
+                            self.item_window.selected_item_from = None
+                            self.item_window.is_grabbing = False
+                    else:
+                        if self.item_window.selected_player.head:
+                            self.item_window.selected_item = self.item_window.selected_player.head
+                            self.item_window.selected_player.head = None
+                            self.item_window.selected_item_position = self.item_window.cursor_position
+                            self.item_window.selected_item_from = self.item_window.EQUIPMENT_RECT
+                            self.item_window.is_grabbing = True
+                elif self.item_window.cursor_position == 2:  # accessory
+                    if self.item_window.is_grabbing:
+                        if not self.item_window.selected_player.accessory:
+                            self.item_window.selected_player.accessory = self.item_window.selected_item
+                            self.item_window.selected_item = None
+                            self.item_window.selected_item_position = None
+                            self.item_window.selected_item_from = None
+                            self.item_window.is_grabbing = False
+                    else:
+                        if self.item_window.selected_player.accessory:
+                            self.item_window.selected_item = self.item_window.selected_player.accessory
+                            self.item_window.selected_player.accessory = None
+                            self.item_window.selected_item_position = self.item_window.cursor_position
+                            self.item_window.selected_item_from = self.item_window.EQUIPMENT_RECT
+                            self.item_window.is_grabbing = True
+                elif self.item_window.cursor_position == 3:  # armor
+                    if self.item_window.is_grabbing:
+                        if not self.item_window.selected_player.body:
+                            self.item_window.selected_player.body = self.item_window.selected_item
+                            self.item_window.selected_item = None
+                            self.item_window.selected_item_position = None
+                            self.item_window.selected_item_from = None
+                            self.item_window.is_grabbing = False
+                    else:
+                        if self.item_window.selected_player.body:
+                            self.item_window.selected_item = self.item_window.selected_player.body
+                            self.item_window.selected_player.body = None
+                            self.item_window.selected_item_position = self.item_window.cursor_position
+                            self.item_window.selected_item_from = self.item_window.EQUIPMENT_RECT
+                            self.item_window.is_grabbing = True
+                elif self.item_window.cursor_position == 4:  # boots
+                    if self.item_window.is_grabbing:
+                        if not self.item_window.selected_player.boots:
+                            self.item_window.selected_player.boots = self.item_window.selected_item
+                            self.item_window.selected_item = None
+                            self.item_window.selected_item_position = None
+                            self.item_window.selected_item_from = None
+                            self.item_window.is_grabbing = False
+                    else:
+                        if self.item_window.selected_player.boots:
+                            self.item_window.selected_item = self.item_window.selected_player.boots
+                            self.item_window.selected_player.boots = None
+                            self.item_window.selected_item_position = self.item_window.cursor_position
+                            self.item_window.selected_item_from = self.item_window.EQUIPMENT_RECT
+                            self.item_window.is_grabbing = True
+                elif self.item_window.cursor_position == 5:  # hand
+                    if self.item_window.is_grabbing:
+                        if not self.item_window.selected_player.arms:
+                            self.item_window.selected_player.arms = self.item_window.selected_item
+                            self.item_window.selected_item = None
+                            self.item_window.selected_item_position = None
+                            self.item_window.selected_item_from = None
+                            self.item_window.is_grabbing = False
+                    else:
+                        if self.item_window.selected_player.arms:
+                            self.item_window.selected_item = self.item_window.selected_player.arms
+                            self.item_window.selected_player.arms = None
+                            self.item_window.selected_item_position = self.item_window.cursor_position
+                            self.item_window.selected_item_from = self.item_window.EQUIPMENT_RECT
+                            self.item_window.is_grabbing = True
 
     def shop_window_handler(self, event):
         global game_state
         if event.type == KEYDOWN and event.key == K_q:
             sounds["pi"].play()
+            # reset everything
+            self.shop_window.selected_item = None
+            self.shop_window.is_grabbing = None
+            self.shop_window.cursor_position = 0
+            self.shop_window.cursor_in_shop_shelf = True
             game_state = FILED
+            self.map.play_bgm()
+            self.map.play_bgm()
+        if event.type == KEYDOWN and event.key == K_UP:
+            if not self.shop_window.cursor_in_shop_shelf:
+                if self.shop_window.cursor_position - 5 >= 0:
+                    sounds["pi"].play()
+                    self.shop_window.cursor_position -= 5
+            else:
+                # if the hand cursor is in the shop shelf
+                if self.shop_window.cursor_position - 3 >= 0:
+                    sounds["pi"].play()
+                    self.shop_window.cursor_position -= 3
+        elif event.type == KEYDOWN and event.key == K_DOWN:
+            if not self.shop_window.cursor_in_shop_shelf:
+                if self.shop_window.cursor_position + 5 < 25:
+                    sounds["pi"].play()
+                    self.shop_window.cursor_position += 5
+            else:
+                # if the hand cursor is not in the shop shelf
+                if self.shop_window.cursor_position + 3 < 12:
+                    sounds["pi"].play()
+                    self.shop_window.cursor_position += 3
+        elif event.type == KEYDOWN and event.key == K_LEFT:
+            if not self.shop_window.cursor_in_shop_shelf:
+                if not self.shop_window.cursor_position == 0 \
+                        and not self.shop_window.cursor_position == 5 \
+                        and not self.shop_window.cursor_position == 10 \
+                        and not self.shop_window.cursor_position == 15 \
+                        and not self.shop_window.cursor_position == 20:
+                    sounds["pi"].play()
+                    self.shop_window.cursor_position -= 1
+            else:
+                # if the hand cursor is in the shop shelf
+                if self.shop_window.cursor_position == 0:
+                    sounds["pi"].play()
+                    self.shop_window.cursor_position = 9
+                    self.shop_window.cursor_in_shop_shelf = False
+                elif self.shop_window.cursor_position == 3:
+                    sounds["pi"].play()
+                    self.shop_window.cursor_position = 14
+                    self.shop_window.cursor_in_shop_shelf = False
+                elif self.shop_window.cursor_position == 6:
+                    sounds["pi"].play()
+                    self.shop_window.cursor_position = 19
+                    self.shop_window.cursor_in_shop_shelf = False
+                elif self.shop_window.cursor_position == 9:
+                    sounds["pi"].play()
+                    self.shop_window.cursor_position = 24
+                    self.shop_window.cursor_in_shop_shelf = False
+                else:
+                    sounds["pi"].play()
+                    self.shop_window.cursor_position -= 1
+
+        elif event.type == KEYDOWN and event.key == K_RIGHT:
+            if not self.shop_window.cursor_in_shop_shelf:
+                if self.shop_window.cursor_position == 4 or self.shop_window.cursor_position == 9:
+                    sounds["pi"].play()
+                    self.shop_window.cursor_position = 0
+                    self.shop_window.cursor_in_shop_shelf = True
+                elif self.shop_window.cursor_position == 14:
+                    sounds["pi"].play()
+                    self.shop_window.cursor_position = 3
+                    self.shop_window.cursor_in_shop_shelf = True
+                elif self.shop_window.cursor_position == 19:
+                    sounds["pi"].play()
+                    self.shop_window.cursor_position = 6
+                    self.shop_window.cursor_in_shop_shelf = True
+                elif self.shop_window.cursor_position == 24:
+                    sounds["pi"].play()
+                    self.shop_window.cursor_position = 9
+                    self.shop_window.cursor_in_shop_shelf = True
+                else:
+                    sounds["pi"].play()
+                    self.shop_window.cursor_position += 1
+            else:
+                # if the hand cursor is in the shop shelf
+                if not self.shop_window.cursor_position == 2 \
+                        and not self.shop_window.cursor_position == 5 \
+                        and not self.shop_window.cursor_position == 8:
+                    sounds["pi"].play()
+                    self.shop_window.cursor_position += 1
+
+        elif event.type == KEYDOWN and event.key == K_SPACE:
+            if self.shop_window.is_grabbing:
+                if self.shop_window.cursor_in_shop_shelf:
+                    if self.shop_window.is_grabbing_product:
+                        sounds["cancel"].play()
+                        self.shop_window.is_grabbing = False
+                        self.shop_window.is_grabbing_product = None
+                        self.shop_window.selected_item_position = None
+                    else:
+                        if self.shop_window.cursor_position == 9:
+                            # sell
+                            sounds["cha-ching"].play()
+                            self.shop_window.purchase_price = -self.shop_window.selected_item.price
+                            self.shop_window.is_grabbing = False
+                            self.shop_window.selected_item = None
+                            self.shop_window.selected_item_position = None
+                            self.shop_window.is_grabbing_product = None
+                        else:
+                            sounds["cancel"].play()
+                            Player.inventory[self.shop_window.selected_item_position] = self.shop_window.selected_item
+                            self.shop_window.selected_item = None
+                            self.shop_window.selected_item_position = None
+                            self.shop_window.is_grabbing = False
+                            self.shop_window.is_grabbing_product = None
+
+                else:
+                    # if the cursor is in the inventory
+                    if not Player.inventory[self.shop_window.cursor_position]:
+                        if self.shop_window.is_grabbing_product:
+                            # buy
+                            if Player.gold - self.shop_window.purchase_price >= self.shop_window.selected_item.price:
+                                sounds["cha-ching"].play()
+                                self.shop_window.purchase_price = self.shop_window.selected_item.price
+                                Player.inventory[self.shop_window.cursor_position] = self.shop_window.selected_item
+                                self.shop_window.selected_item = None
+                                self.shop_window.selected_item_position = None
+                                self.shop_window.is_grabbing = False
+                                self.shop_window.is_grabbing_product = None
+                            else:
+                                sounds["cancel"].play()
+                        else:
+                            Player.inventory[self.shop_window.cursor_position] = self.shop_window.selected_item
+                            self.shop_window.selected_item = None
+                            self.shop_window.selected_item_position = None
+                            self.shop_window.is_grabbing = False
+                            self.shop_window.is_grabbing_product = None
+
+                    else:
+                        sounds["cancel"].play()
+
+            else:
+                # if not grabbing
+                if self.shop_window.cursor_in_shop_shelf:
+                    if self.shop_window.cursor_position < len(self.shop_window.items_on_sale):
+                        self.shop_window.selected_item = self.shop_window.items_on_sale[self.shop_window.cursor_position]
+                        self.shop_window.selected_item_position = self.shop_window.cursor_position
+                        self.shop_window.is_grabbing = True
+                        self.shop_window.is_grabbing_product = True
+                        sounds["pick2"].play()
+                else:
+                    # if the cursor is in the inventory
+                    if Player.inventory[self.shop_window.cursor_position]:
+                        sounds["pick2"].play()
+                        self.shop_window.selected_item = Player.inventory[self.shop_window.cursor_position]
+                        self.shop_window.selected_item_position = self.shop_window.cursor_position
+                        Player.inventory[self.shop_window.cursor_position] = None
+                        self.shop_window.is_grabbing = True
+                        self.shop_window.is_grabbing_product = False
+
+        elif event.type == KEYDOWN and event.key == K_c:
+            Player.inventory[0] = Item("agl", "test", 100)
 
     def battle_command_handler(self, event):
         global game_state
@@ -200,6 +702,11 @@ class pyRPG:
             if self.battle.command_window.command == BattleCommandWindow.ESCAPE:
                 self.map.play_bgm()
                 game_state = FILED
+            elif self.battle.command_window.command == BattleCommandWindow.ATTACK:
+                self.battle.skill_effect = self.battle.party.members[0].skills[0]
+                self.battle.skill_effect.invoke()
+                self.battle.command_window.show()
+                game_state = BATTLE_COMMAND
             else:
                 self.battle.command_window.show()
                 game_state = BATTLE_COMMAND
@@ -276,6 +783,7 @@ class pyRPG:
                         if isinstance(character, Clerk):
                             self.shop_window.set_clerk(character)
                             game_state = SHOP
+                            self.shop_window.play_bgm()
                         else:
                             self.message_window.set_message(character.message)
                             game_state = TALK
@@ -287,6 +795,7 @@ class pyRPG:
                     self.command_window.hide()
                     self.player_status_window.show()
                     game_state = STATUS
+                    self.player_status_window.play_bgm()
                 elif self.command_window.command == CommandWindow.EQUIPMENT:
                     sounds["pi"].play()
                     self.command_window.hide()
@@ -311,8 +820,8 @@ class pyRPG:
                 elif self.command_window.command == CommandWindow.ITEM:
                     sounds["pi"].play()
                     self.command_window.hide()
-                    self.message_window.set_message("show tactics")
-                    game_state = TALK
+                    self.item_window.show()
+                    game_state = ITEM
                 elif self.command_window.command == CommandWindow.SEARCH:
                     sounds["pi"].play()
                     self.command_window.hide()
@@ -354,6 +863,7 @@ class pyRPG:
                 self.player_status_window.page = 0
                 global game_state
                 game_state = FILED
+                self.map.play_bgm()
         elif event.type == KEYDOWN and event.key == K_LEFT:
             if not self.player_status_window.selection == self.player_status_window.STATUS_WINDOW \
                     and not self.player_status_window.points_distribution_flag:
@@ -436,7 +946,7 @@ class pyRPG:
             item_name = data[1]
             item_class = data[2]
             item_power = data[3]
-            item_price = data[4]
+            item_price = int(data[4])
             item_description = data[5]
             if item_class == "Sword":
                 Shop.items.append(Sword(item_name, item_description, item_price, item_power))
@@ -452,6 +962,7 @@ class pyRPG:
         for file_name in sound_file_name_list:
             sound_file_path = os.path.join(directory, file_name)
             sounds[file_name[:-4]] = pygame.mixer.Sound(sound_file_path)
+            sounds[file_name[:-4]].set_volume(0.01)
 
     def load_character_chips(self, directory, file_name):
         file_path = os.path.join(directory, file_name)
@@ -465,8 +976,7 @@ class pyRPG:
             character_name = data[1]
             row = int(data[2])
             column = int(data[3])
-            Character.images[character_name] = split_image(load_image("charachip", character_name + ".png"), row,
-                                                           column)
+            Character.images[character_name] = split_image(load_image("charachip", character_name + ".png"), TILE_SIZE)
         file.close()
 
     def load_map_chips(self, directory, file_name):
@@ -769,12 +1279,90 @@ class Character:
         self.direction = direction
 
 
+class Item:
+    # Author: Junhong Wang
+    # Date: 2016/11/19
+    # Description: none
+    def __init__(self, name, description, price):
+        self.name = name
+        self.description = description
+        self.price = price
+        self.image = load_image("itemicon", name+".png")
+
+
+class Sword(Item):
+
+    def __init__(self, name, description, price, attack):
+        Item.__init__(self, name, description, price)
+        self.attack = attack
+
+
+
+class Armor(Item):
+    def __init__(self, name, description, price, defence):
+        Item.__init__(self, name, description, price)
+        self.defence = defence
+
+
+class Axe(Item):
+
+    def __init__(self, name, description, price, attack):
+        Item.__init__(self, name, description, price)
+        self.attack = attack
+
+
+class Lance(Item):
+
+    def __init__(self, name, description, price, attack):
+        Item.__init__(self, name, description, price)
+        self.attack = attack
+
+
+class Cane(Item):
+
+    def __init__(self, name, description, price, intelligence):
+        Item.__init__(self, name, description, price)
+        self.intelligence = intelligence
+
+
+class Helmet(Item):
+
+    def __init__(self, name, description, price, defence):
+        Item.__init__(self, name, description, price)
+        self.defence = defence
+
+
+class Shoes(Item):
+
+    def __init__(self, name, description, price, defence):
+        Item.__init__(self, name, description, price)
+        self.defence = defence
+
+
+class Gloves(Item):
+
+    def __init__(self, name, description, price, defence):
+        Item.__init__(self, name, description, price)
+        self.defence = defence
+
+
+class Accessory(Item):
+
+    def __init__(self, name, description, price, defence):
+        Item.__init__(self, name, description, price)
+        self.defence = defence
+
+
 class Player(Character):
+
+    inventory = [None] * 25
+    gold = 500
 
     def __init__(self, name, row, column, position, direction, is_leader, party):
         Character.__init__(self, name, row, column, position, direction, INPUT_MOVE, None)
         self.is_leader = is_leader
         self.party = party
+        self.bag = [None] * 5
 
     def input(self, map, battle):
         if self.moving:
@@ -883,31 +1471,6 @@ class Player(Character):
 
         self.velocity_x, self.velocity_y = dx*self.speed, dy*self.speed
         self.moving = True
-
-
-def load_image(directory, filename):
-    filename = os.path.join(directory, filename)
-    try:
-        image = pygame.image.load(filename).convert_alpha()
-    except pygame.error:
-        print("Cannot find image")
-    return image
-
-
-def split_image(image, row, column):
-    image_list = []
-    for r in range(0, row*TILE_SIZE, TILE_SIZE):
-        for c in range(0, column*TILE_SIZE, TILE_SIZE):
-            trimmed_image = pygame.Surface((TILE_SIZE, TILE_SIZE))
-            trimmed_image.blit(image, (0, 0), (c, r, TILE_SIZE, TILE_SIZE))
-            #  The optional flags argument can be set to pygame.RLEACCEL
-            #  to provide better performance on non accelerated displays
-            #  choose the pixel color at top-left to be transparent
-            trimmed_image.set_colorkey(trimmed_image.get_at((0, 0)), RLEACCEL)
-            #  make the image editable
-            trimmed_image.convert()
-            image_list.append(trimmed_image)
-    return image_list
 
 
 class Window:
@@ -1254,6 +1817,7 @@ class Title:
         bgm_file_name = "title.ogg"
         bgm_file_path = os.path.join("bgm", bgm_file_name)
         pygame.mixer.music.load(bgm_file_path)
+        pygame.mixer.music.set_volume(0.01)
         pygame.mixer.music.play(-1)
 
 
@@ -1261,7 +1825,7 @@ class Battle:
 
     images = []
 
-    def __init__(self, message_window, message_engine):
+    def __init__(self, party, message_window, message_engine):
         self.message_window = message_window
         self.message_engine = message_engine
         self.command_window = BattleCommandWindow(Rect(96, 338, 136, 136), self.message_engine)
@@ -1269,6 +1833,8 @@ class Battle:
                   ["ally1", 15, 24],
                   ["ally2", 10, 8],
                   ["ally3", 8, 12]]
+
+        self.party = party
 
         self.battle_status_windows = []
         self.battle_status_windows.append(BattleStatusWindow(Rect(90, 8, 104, 136), status[0], self.message_engine))
@@ -1278,6 +1844,8 @@ class Battle:
 
         self.background_image = load_image("data", "grass.png")
         self.enemy = None
+
+        self.skill_effect = None
 
     def start(self, map):
         self.command_window.hide()
@@ -1296,13 +1864,18 @@ class Battle:
         screen.blit(self.background_image, (0, 0))
         center_rect = self.enemy.image.get_rect(center=SCREEN_RECT.center)
         screen.blit(self.enemy.image, center_rect)
+        if self.skill_effect:
+            if self.skill_effect.life:
+                self.skill_effect.draw(screen)
         self.command_window.draw(screen)
         for battle_status_window in self.battle_status_windows:
             battle_status_window.draw(screen)
 
+
+
         # test
-        image = load_image("skilleffect", "attack1.png")
-        screen.blit(image, (0, 0))
+        # image = load_image("skilleffect", "attack1.png")
+        # screen.blit(image, (0, 0))
 
 
     def play_bgm(self):
@@ -1356,7 +1929,7 @@ class BattleStatusWindow(Window):
         self.frame = 0
 
     def draw(self, screen):
-        Window.draw(self, screen)
+        # Window.draw(self, screen)
         if not self.is_visible:
             return
         status_info = [str(self.status[0]), "H"+str(self.status[1]), "M"+str(self.status[2])]
@@ -1370,7 +1943,6 @@ class Class(Player):
     # Author: Junhong Wang
     # Date: 2016/11/10
     # Description: parameters for players
-
 
     def __init__(self, name, row, column, position, direction, is_leader, party,
                  health, attack, intelligence, defence, magic_resistance, agility, critical_hit):
@@ -1392,12 +1964,13 @@ class Class(Player):
         self.skill_points = 0
 
         # equipments
+        self.weapon = None
         self.head = None
         self.body = None
         self.arms = None
         self.legs = None
         self.boots = None
-
+        self.accessory = None
 
 class Knight(Class):
     # Author: Junhong Wang
@@ -1406,18 +1979,18 @@ class Knight(Class):
     def __init__(self, name, row, column, position, direction, is_leader, party):
         Class.__init__(self, name, row, column, position, direction, is_leader, party,
                        16, 4, 0, 5, 3, 10, 8)
-        self.skills.append(Skill("Deadly Sins",
+        self.skills.append(Skill("Deadly Sins", "Attack12",
                                  "A seven hit skill that consists of various slashes, "
                                  "several full circle spins and a backwards somersault.",
                                  0, 7))
-        self.skills.append(Skill("Horizontal",
+        self.skills.append(Skill("Horizontal", "Attack1",
                                  "A simple sword skill slashing horizontally.",
                                  0, 2))
-        self.skills.append(Skill("Horizontal Arc",
+        self.skills.append(Skill("Horizontal Arc", "Attack1",
                                  "A flat two-part skill that involves a horizontal swing from left to right, "
                                  "followed by another horizontal swing in from right to left.",
                                  0, 3))
-        self.skills.append(Skill("Horizontal Square",
+        self.skills.append(Skill("Horizontal Square", "Attack1",
                                  "A mid-level sword skill tracing the shape of a rhombus.",
                                  0, 4))
 
@@ -1431,18 +2004,18 @@ class Mage(Class):
     def __init__(self, name, row, column, position, direction, is_leader, party):
         Class.__init__(self, name, row, column, position, direction, is_leader, party,
                        16, 0, 4, 4, 6, 4, 1)
-        self.skills.append(Skill("Deadly Sins",
+        self.skills.append(Skill("Deadly Sins", "Attack1",
                                  "A seven hit skill that consists of various slashes, "
                                  "several full circle spins and a backwards somersault.",
                                  0, 7))
-        self.skills.append(Skill("Horizontal",
+        self.skills.append(Skill("Horizontal", "Attack1",
                                  "A simple sword skill slashing horizontally.",
                                  0, 2))
-        self.skills.append(Skill("Horizontal Arc",
+        self.skills.append(Skill("Horizontal Arc", "Attack1",
                                  "A flat two-part skill that involves a horizontal swing from left to right, "
                                  "followed by another horizontal swing in from right to left.",
                                  0, 3))
-        self.skills.append(Skill("Horizontal Square",
+        self.skills.append(Skill("Horizontal Square", "Attack1",
                                  "A mid-level sword skill tracing the shape of a rhombus.",
                                  0, 4))
 
@@ -1454,18 +2027,18 @@ class Tank(Class):
     def __init__(self, name, row, column, position, direction, is_leader, party):
         Class.__init__(self, name, row, column, position, direction, is_leader, party,
                        16, 5, 0, 11, 1, 3, 1)
-        self.skills.append(Skill("Deadly Sins",
+        self.skills.append(Skill("Deadly Sins", "Attack1",
                                  "A seven hit skill that consists of various slashes, "
                                  "several full circle spins and a backwards somersault.",
                                  0, 7))
-        self.skills.append(Skill("Horizontal",
+        self.skills.append(Skill("Horizontal", "Attack1",
                                  "A simple sword skill slashing horizontally.",
                                  0, 2))
-        self.skills.append(Skill("Horizontal Arc",
+        self.skills.append(Skill("Horizontal Arc", "Attack1",
                                  "A flat two-part skill that involves a horizontal swing from left to right, "
                                  "followed by another horizontal swing in from right to left.",
                                  0, 3))
-        self.skills.append(Skill("Horizontal Square",
+        self.skills.append(Skill("Horizontal Square", "Attack1",
                                  "A mid-level sword skill tracing the shape of a rhombus.",
                                  0, 4))
 
@@ -1477,18 +2050,18 @@ class Assassin(Class):
     def __init__(self, name, row, column, position, direction, is_leader, party):
         Class.__init__(self, name, row, column, position, direction, is_leader, party,
                        16, 4, 0, 4, 2, 12, 10)
-        self.skills.append(Skill("Deadly Sins",
+        self.skills.append(Skill("Deadly Sins", "Attack1",
                                  "A seven hit skill that consists of various slashes, "
                                  "several full circle spins and a backwards somersault.",
                                  0, 7))
-        self.skills.append(Skill("Horizontal",
+        self.skills.append(Skill("Horizontal", "Attack1",
                                  "A simple sword skill slashing horizontally.",
                                  0, 2))
-        self.skills.append(Skill("Horizontal Arc",
+        self.skills.append(Skill("Horizontal Arc", "Attack1",
                                  "A flat two-part skill that involves a horizontal swing from left to right, "
                                  "followed by another horizontal swing in from right to left.",
                                  0, 3))
-        self.skills.append(Skill("Horizontal Square",
+        self.skills.append(Skill("Horizontal Square", "Attack1",
                                  "A mid-level sword skill tracing the shape of a rhombus.",
                                  0, 4))
 
@@ -1500,18 +2073,18 @@ class Priest(Class):
     def __init__(self, name, row, column, position, direction, is_leader, party):
         Class.__init__(self, name, row, column, position, direction, is_leader, party,
                        16, 0, 4, 3, 4, 4, 1)
-        self.skills.append(Skill("Deadly Sins",
+        self.skills.append(Skill("Deadly Sins", "Attack1",
                                  "A seven hit skill that consists of various slashes, "
                                  "several full circle spins and a backwards somersault.",
                                  0, 7))
-        self.skills.append(Skill("Horizontal",
+        self.skills.append(Skill("Horizontal", "Attack1",
                                  "A simple sword skill slashing horizontally.",
                                  0, 2))
-        self.skills.append(Skill("Horizontal Arc",
+        self.skills.append(Skill("Horizontal Arc", "Attack1",
                                  "A flat two-part skill that involves a horizontal swing from left to right, "
                                  "followed by another horizontal swing in from right to left.",
                                  0, 3))
-        self.skills.append(Skill("Horizontal Square",
+        self.skills.append(Skill("Horizontal Square", "Attack1",
                                  "A mid-level sword skill tracing the shape of a rhombus.",
                                  0, 4))
 
@@ -1550,7 +2123,7 @@ class Enemy:
 
 class PlayerStatusWindow(Window):
 
-    # Author: Junhong
+    # Author: Junhong Wang
     # Date: 2016/11/12
     # Description: status window when STATUS in command window is selected
 
@@ -1799,11 +2372,20 @@ class PlayerStatusWindow(Window):
         # finish drawing
         # self.message_engine.set_color(WHITE)
 
+    def play_bgm(self):
+        bgm_file_name = "shop.ogg"
+        bgm_file_path = os.path.join("bgm", bgm_file_name)
+        pygame.mixer.music.load(bgm_file_path)
+        pygame.mixer.music.play(-1)
+
 
 class Skill:
 
-    def __init__(self, name, description, bonus_power, bonus_rate):
+    MAX_LIFE = 10
+
+    def __init__(self, name, image_name, description, bonus_power, bonus_rate):
         self.name = name
+        self.image_name = image_name
         self.description = description
         # addition to player power
         self.bonus_power = bonus_power
@@ -1811,81 +2393,28 @@ class Skill:
         self.bonus_rate = bonus_rate
 
         self.level = 0
+        self.images = split_image(load_image("skilleffect", image_name+".png"), SKILL_EFFECT_SIZE)
 
-    def draw(self):
-        pass
+        self.life = 0
 
+    def draw(self, screen):
+        index = (len(self.images) - 1) - int(self.life / (self.MAX_LIFE / len(self.images)))
+        if index < 0:
+            index = 0
+        # print(index)
+        center_rect = self.images[index].get_rect(center=SCREEN_RECT.center)
+        blend_factor = self.life % (self.MAX_LIFE / len(self.images))
+        print(blend_factor)
+        if index + 1 < len(self.images):
+            image = blend_image(self.images[index], self.images[index+1], blend_factor)
+        else:
+            image = self.images[index]
+        screen.blit(image, center_rect)
+        self.life -= 1
 
-class Item:
-    # Author: Junhong Wang
-    # Date: 2016/11/19
-    # Description: none
-    def __init__(self, name, description, price):
-        self.name = name
-        self.description = description
-        self.image = load_image("itemicon", name+".png")
-
-
-class Sword(Item):
-
-    def __init__(self, name, description, price, attack):
-        Item.__init__(self, name, description, price)
-        self.attack = attack
-
-
-class Armor(Item):
-    def __init__(self, name, description, price, defence):
-        Item.__init__(self, name, description, price)
-        self.defence = defence
-
-
-class Axe(Item):
-
-    def __init__(self, name, description, price, attack):
-        Item.__init__(self, name, description, price)
-        self.attack = attack
-
-
-class Lance(Item):
-
-    def __init__(self, name, description, price, attack):
-        Item.__init__(self, name, description, price)
-        self.attack = attack
-
-
-class Cane(Item):
-
-    def __init__(self, name, description, price, intelligence):
-        Item.__init__(self, name, description, price)
-        self.intelligence = intelligence
-
-
-class Helmet(Item):
-
-    def __init__(self, name, description, price, defence):
-        Item.__init__(self, name, description, price)
-        self.defence = defence
-
-
-class Shoes(Item):
-
-    def __init__(self, name, description, price, defence):
-        Item.__init__(self, name, description, price)
-        self.defence = defence
-
-
-class Gloves(Item):
-
-    def __init__(self, name, description, price, defence):
-        Item.__init__(self, name, description, price)
-        self.defence = defence
-
-
-class Accessory(Item):
-
-    def __init__(self, name, description, price, defence):
-        Item.__init__(self, name, description, price)
-        self.defence = defence
+    def invoke(self):
+        self.life = self.MAX_LIFE
+        sounds["sword_slice"].play()
 
 
 class Shop:
@@ -1922,25 +2451,455 @@ class ShopWindow(Window):
     # Date: 2016/11/19
     # Description: Player can buy item at a shop when talking with a clerk
 
-    def __init__(self, rect):
+    def __init__(self, rect, message_engine):
         Window.__init__(self, rect)
         self.clerk = None
+        self.message_engine = message_engine
         self.inventory_image = load_image("data", "inventory.png")
         self.shop_shelf_image = load_image("data", "shopshelf.png")
+
+        self.shop_shelf_rect = Rect(SCREEN_RECT.width*0.6, SCREEN_RECT.height*0.15,
+                                    self.shop_shelf_image.get_rect().width, self.shop_shelf_image.get_rect().height)
+        self.inventory_rect = Rect(SCREEN_RECT.width*0.1, SCREEN_RECT.height*0.1,
+                                   self.inventory_image.get_rect().width, self.inventory_image.get_rect().height)
+
         self.shop_background_image = load_image("data", "shop_background.png")
         self.text_rect = Rect(0.05 * rect.width, 0.75 * rect.height, 0.9 * rect.width, 0.2 * rect.height)
         self.text_inner_rect = self.text_rect.inflate(-8, -8)
+        self.cursor_image = load_image("data", "hand_cursor.png")
+        self.cursor_grab_image = load_image("data", "hand_cursor_grab.png")
+        self.cursor_position = 0
+        self.cursor_in_shop_shelf = False
+        self.items_on_sale = None
+        self.is_grabbing = False
+        self.is_grabbing_product = False
+
+        self.selected_item = None
+        self.selected_item_position = None
+
+        self.gold_rect = Rect(0, 0, 100, self.message_engine.font_height+8)
+        self.gold_inner_rect = self.gold_rect.inflate(-8, -8)
+
+        self.purchase_price = 0
+        self.gold_decrease_speed = 7
+
+        self.price_rect = Rect(0, 0, 100, self.message_engine.font_height+8)
+        self.price_inner_rect = self.price_rect.inflate(-8, -8)
 
     def set_clerk(self, clerk):
         self.clerk = clerk
+        self.items_on_sale = self.clerk.shop.items_on_sale
         self.show()
 
+    def update(self):
+        if self.cursor_in_shop_shelf:
+            if self.cursor_position == 10:
+                self.cursor_position = 7
+            elif self.cursor_position == 11:
+                self.cursor_position = 8
+
     def draw(self, screen):
+        # draw boards
         screen.blit(self.shop_background_image, (0, 0))
-        screen.blit(self.inventory_image, (0, 0))
-        screen.blit(self.shop_shelf_image, (SCREEN_RECT.width*0.7, 0))
+        screen.blit(self.inventory_image, self.inventory_rect.topleft)
+        screen.blit(self.shop_shelf_image, self.shop_shelf_rect.topleft)
+
+        # draw items (inventory)
+        offset = 15
+        for i in range(len(Player.inventory)):
+            if Player.inventory[i]:
+                dx = self.inventory_rect.left + 50*(i % 5)
+                dy = self.inventory_rect.top + 50*int(i / 5)
+                screen.blit(Player.inventory[i].image, (dx+offset, dy+offset))
+        # draw items (shop)
+        dx = self.shop_shelf_rect.left
+        dy = self.shop_shelf_rect.top
+        offset1_x = 25
+        offset1_y = 25
+        offset2_x = 50
+        offset2_y = 50
+        for i in range(len(self.items_on_sale)):
+            screen.blit(self.items_on_sale[i].image, (dx+offset1_x+offset2_x*(i % 3), dy+offset1_y+offset2_y*int(i / 3)))
+
+        # draw the hand cursor
+        offset1 = 50
+        offset3 = 15  # so that the finger will point to the center of the square
+        if not self.cursor_in_shop_shelf:
+            offset1_factor_x = self.cursor_position % 5
+            offset1_factor_y = int(self.cursor_position / 5)
+            offset2 = 10
+
+            if not self.is_grabbing:
+                screen.blit(self.cursor_image,
+                            (self.inventory_rect.left+offset1*offset1_factor_x+offset2,
+                                self.inventory_rect.top+offset1*offset1_factor_y+offset2+offset3))
+            else:
+                screen.blit(self.selected_item.image, (self.inventory_rect.left + offset1 * offset1_factor_x + offset2,
+                                                 self.inventory_rect.top + offset1 * offset1_factor_y + offset2 + offset3))
+                screen.blit(self.cursor_grab_image,
+                            (self.inventory_rect.left + offset1 * offset1_factor_x + offset2,
+                             self.inventory_rect.top + offset1 * offset1_factor_y + offset2 + offset3))
+        else:
+            # if the hand cursor is in the shop shelf
+            offset1_factor_x = self.cursor_position % 3
+            offset1_factor_y = int(self.cursor_position / 3)
+            offset2 = 20
+            if not self.is_grabbing:
+                screen.blit(self.cursor_image,
+                            (self.shop_shelf_rect.left + offset1 * offset1_factor_x + offset2,
+                             self.shop_shelf_rect.top + offset1 * offset1_factor_y + offset2 + offset3))
+            else:
+                screen.blit(self.selected_item.image, (self.shop_shelf_rect.left + offset1 * offset1_factor_x + offset2,
+                                                 self.shop_shelf_rect.top + offset1 * offset1_factor_y + offset2 + offset3))
+                screen.blit(self.cursor_grab_image,
+                            (self.shop_shelf_rect.left + offset1 * offset1_factor_x + offset2,
+                             self.shop_shelf_rect.top + offset1 * offset1_factor_y + offset2 + offset3))
+
+        if self.cursor_in_shop_shelf:
+            if self.cursor_position < len(self.items_on_sale):
+                if not self.is_grabbing_product:
+                    # draw price box
+                    dx = self.shop_shelf_rect.left
+                    dy = self.shop_shelf_rect.top
+                    offset1 = 50
+                    offset1 = 50
+                    offset1_factor_x = self.cursor_position % 3
+                    offset1_factor_y = int(self.cursor_position / 3)
+                    offset2 = 20
+
+                    self.price_rect.topleft = (dx + offset1 * offset1_factor_x + offset2, dy + offset1 * offset1_factor_y)
+                    self.price_inner_rect = self.price_rect.inflate(-8, -8)
+                    pygame.draw.rect(screen, WHITE, self.price_rect, 0)
+                    pygame.draw.rect(screen, BLACK, self.price_inner_rect, 0)
+
+                    # draw price
+                    dx = self.price_inner_rect.left
+                    dy = self.price_inner_rect.top
+                    self.message_engine.draw(screen, str(self.items_on_sale[self.cursor_position].price), (dx, dy))
+                    dx = self.price_inner_rect.right - self.message_engine.font_width
+                    self.message_engine.draw(screen, "G", (dx, dy))
+
+
+        # draw the text boxes
         pygame.draw.rect(screen, WHITE, self.text_rect, 0)
         pygame.draw.rect(screen, BLACK, self.text_inner_rect, 0)
+
+        # draw the texts
+        if self.cursor_in_shop_shelf:
+            if self.cursor_position < len(self.items_on_sale):
+                dx = self.text_inner_rect.left
+                dy = self.text_inner_rect.top
+                self.message_engine.draw(screen,
+                                         self.items_on_sale[self.cursor_position].description + ", "
+                                         + str(self.items_on_sale[self.cursor_position].price) + "G",
+                                         (dx, dy))
+        else:
+            # if the cursor is in the inventory
+            try:
+                if Player.inventory[self.cursor_position]:
+                    dx = self.text_inner_rect.left
+                    dy = self.text_inner_rect.top
+                    self.message_engine.draw(screen,
+                                             Player.inventory[self.cursor_position].description + ", "
+                                             + str(Player.inventory[self.cursor_position].price) + "G",
+                                             (dx, dy))
+            except IndexError:
+                pass
+
+        # draw gold box
+        pygame.draw.rect(screen, WHITE, self.gold_rect, 0)
+        pygame.draw.rect(screen, BLACK, self.gold_inner_rect, 0)
+
+        # draw the amount of gold
+        dx = self.gold_inner_rect.left
+        dy = self.gold_inner_rect.top
+
+        if self.purchase_price == 0:
+            pass
+        elif self.purchase_price - self.gold_decrease_speed >= 0:
+            self.purchase_price -= self.gold_decrease_speed
+            Player.gold -= self.gold_decrease_speed
+        else:
+            # self.purchase_price - self.gold_decrease_speed < 0
+            Player.gold -= self.purchase_price
+            self.purchase_price = 0
+
+        self.message_engine.draw(screen, str(Player.gold), (dx, dy))
+
+        dx = self.gold_inner_rect.right - self.message_engine.font_width
+        self.message_engine.draw(screen, "G", (dx, dy))
+
+    def play_bgm(self):
+        bgm_file_name = "shop.ogg"
+        bgm_file_path = os.path.join("bgm", bgm_file_name)
+        pygame.mixer.music.load(bgm_file_path)
+        pygame.mixer.music.play(-1)
+
+
+class ItemWindow(Window):
+
+    # Author: Junhong Wang
+    # Date: 11/23/2016
+    # Description: window for the items and player equipments
+
+    STATUS = ["HP", "ATK", "INT", "DEF", "MGR", "AGL", "CRI", "EXE"]
+    INVENTORY_RECT, EQUIPMENT_RECT, BAG_RECT, DROP_RECT = 0, 1, 2, 3
+
+    def __init__(self, rect, message_engine, party):
+        Window.__init__(self, rect)
+        self.message_engine = message_engine
+        self.background_image = load_image("data", "item_window_bg.png")
+        self.inventory_image = load_image("data", "inventory.png")
+        self.bag_image = load_image("data", "bag.png")
+        self.hand_cursor_image = load_image("data", "hand_cursor.png")
+        self.hand_cursor_grab_image = load_image("data", "hand_cursor_grab.png")
+        self.drop_image = load_image("data", "drop.png")
+        self.weapon_equipment_image = load_image("data", "weapon.png")
+        self.body_equipment_image = load_image("data", "body.png")
+        self.head_equipment_image = load_image("data", "head.png")
+        self.hand_equipment_image = load_image("data", "hand.png")
+        self.boots_equipment_image = load_image("data", "boots.png")
+        self.accessory_equipment_image = load_image("data", "accessory.png")
+        self.player_info_rect = Rect(0, 0, SCREEN_RECT.width, SCREEN_RECT.height*0.1)
+        self.bag_rect = Rect(0, SCREEN_RECT.height*0.1, SCREEN_RECT.width*0.45, SCREEN_RECT.height*0.1)
+        self.inventory_rect = Rect(SCREEN_RECT.width*0.45, SCREEN_RECT.height*0.1,
+                                   SCREEN_RECT.width*0.55, SCREEN_RECT.height*0.6)
+        self.equipment_rect = Rect(0, SCREEN_RECT.height*0.2, SCREEN_RECT.width*0.45, SCREEN_RECT.height*0.5)
+        self.status_rect = Rect(0, SCREEN_RECT.height*0.7, SCREEN_RECT.width, SCREEN_RECT.height*0.3)
+        self.text_rect = Rect(0, SCREEN_RECT.height*0.9, SCREEN_RECT.width, SCREEN_RECT.height*0.1)
+        self.text_inner_rect = self.text_rect.inflate(-8, -8)
+        self.party = party
+
+        self.status_images = []
+        self.status_images.append(load_image("itemicon", "hp.png"))
+        self.status_images.append(load_image("itemicon", "atk.png"))
+        self.status_images.append(load_image("itemicon", "int.png"))
+        self.status_images.append(load_image("itemicon", "def.png"))
+        self.status_images.append(load_image("itemicon", "mgr.png"))
+        self.status_images.append(load_image("itemicon", "agl.png"))
+        self.status_images.append(load_image("itemicon", "cri.png"))
+        self.status_images.append(load_image("itemicon", "exe.png"))
+
+        self.cursor_right_image = load_image("data", "cursor_right.png")
+        self.cursor_left_image = load_image("data", "cursor_left.png")
+
+        self.cursor_is_in = self.INVENTORY_RECT
+        self.cursor_position = 0
+        self.is_grabbing = False
+        self.selected_item = None
+        self.selected_item_position = None
+        self.selected_item_from = None
+
+        self.page = 0
+        self.selected_player = self.party.members[self.page]
+
+
+    def update(self):
+        self.party.members[0].update()
+
+    def draw(self, screen):
+        screen.blit(self.background_image, (0, 0))
+
+        # draw selected player info
+        dx = self.player_info_rect.left
+        dy = self.player_info_rect.top
+        offset_y = 10
+        screen.blit(self.cursor_left_image, (dx, dy + offset_y))
+        dx = self.player_info_rect.right
+        screen.blit(self.cursor_right_image, (dx - self.cursor_right_image.get_rect().width, dy + offset_y))
+        self.message_engine.draw_center(screen, self.selected_player.name, self.player_info_rect)
+
+        # bag rect
+        dx = self.bag_rect.centerx
+        dy = self.bag_rect.top
+        offset_x = self.bag_image.get_rect().width*0.5
+        screen.blit(self.bag_image, (dx - offset_x, dy))
+
+        # draw items in bag
+        for i in range(5):
+            item = self.selected_player.bag[i]
+            if item:
+                offset2_x = 25 - item.image.get_rect().width*0.5
+                offset3_x = 50 * i
+                offset2_y = self.bag_image.get_rect().height * 0.5 - item.image.get_rect().height * 0.5
+                screen.blit(item.image, (dx - offset_x + offset2_x + offset3_x, dy + offset2_y))
+
+
+        # inventory rect
+        dx = self.inventory_rect.left
+        dy = self.inventory_rect.top
+        offset_x = 10
+        offset_y = 20
+        screen.blit(self.inventory_image, (dx + offset_x, dy + offset_y))
+        offset_x = self.inventory_image.get_rect().width + 20
+        offset_y = self.inventory_image.get_rect().height - 30
+        screen.blit(self.drop_image, (dx + offset_x, dy + offset_y))
+
+        # draw items in the inventory
+        for i in range(len(Player.inventory)):
+            if Player.inventory[i]:
+                dx = self.inventory_rect.left
+                dy = self.inventory_rect.top
+                offset_x = 10
+                offset_y = 20
+                offset2_x = 25 - Player.inventory[i].image.get_rect().width*0.5
+                offset2_y = 25 - Player.inventory[i].image.get_rect().height*0.5
+                offset3_x = 50 * (i % 5)
+                offset3_y = 50 * int(i / 5)
+                screen.blit(Player.inventory[i].image,
+                            (dx + offset_x + offset2_x + offset3_x, dy + offset_y + offset2_y + offset3_y))
+
+        # equipment rect
+        dx = self.equipment_rect.left
+        dy = self.equipment_rect.top
+        offset_x = 20
+        offset_y = 20
+        screen.blit(self.weapon_equipment_image, (dx + offset_x, dy + offset_y))
+        offset_y += 20 + 50
+        screen.blit(self.accessory_equipment_image, (dx + offset_x, dy + offset_y))
+        offset_y += 20 + 50
+        screen.blit(self.boots_equipment_image, (dx + offset_x, dy + offset_y))
+        dx = self.equipment_rect.centerx
+        dy = self.equipment_rect.centery
+        offset_x = self.party.members[0].image.get_rect().width*0.5
+        offset_y = self.party.members[0].image.get_rect().height*0.5
+        screen.blit(self.party.members[0].image,
+                    (dx - offset_x, dy - offset_y))
+        dx = self.equipment_rect.right
+        dy = self.equipment_rect.top
+        offset_x = 20 + 50
+        offset_y = 20
+        screen.blit(self.head_equipment_image, (dx - offset_x, dy + offset_y))
+        offset_y += 20 + 50
+        screen.blit(self.body_equipment_image, (dx - offset_x, dy + offset_y))
+        offset_y += 20 + 50
+        screen.blit(self.hand_equipment_image, (dx - offset_x, dy + offset_y))
+
+        # draw items in equipment rect
+        equipments = [self.selected_player.weapon, self.selected_player.head,
+                      self.selected_player.accessory, self.selected_player.body,
+                      self.selected_player.boots, self.selected_player.arms]
+        for i in range(len(equipments)):
+            if equipments[i]:
+                if i % 2 == 0:
+                    dx = self.equipment_rect.left
+                    dy = self.equipment_rect.top
+                    offset_x = 20
+                    offset_y = 20
+                    offset2_x = 25 - equipments[i].image.get_rect().width*0.5
+                    offset2_y = 25 - equipments[i].image.get_rect().height*0.5
+                    offset3_y = int(i / 2) * (20 + 50)
+                    screen.blit(equipments[i].image,
+                                (dx + offset_x + offset2_x, dy + offset_y + offset2_y + offset3_y))
+                else:
+                    dx = self.equipment_rect.right
+                    dy = self.equipment_rect.top
+                    offset_x = 20 + 25
+                    offset_y = 20
+                    offset2_x = 25 - equipments[i].image.get_rect().width * 0.5
+                    offset2_y = 25 - equipments[i].image.get_rect().height * 0.5
+                    offset3_y = int(i / 2) * (20 + 50)
+                    screen.blit(equipments[i].image,
+                                (dx - offset_x - offset2_x, dy + offset_y + offset2_y + offset3_y))
+
+        # status rect
+        status = [self.selected_player.health, self.selected_player.attack, self.selected_player.intelligence,
+                  self.selected_player.defence, self.selected_player.magic_resistance, self.selected_player.agility,
+                  self.selected_player.critical_hit, self.selected_player.experience]
+        for i in range(len(self.STATUS)):
+            dx = self.status_rect.left
+            dy = self.status_rect.top
+            dx += self.status_rect.width * 0.33 * int(i / 3)
+            dy += 30 * (i % 3)
+            screen.blit(self.status_images[i], (dx, dy))
+            self.message_engine.draw(screen, self.STATUS[i], (dx + 30, dy))
+            screen.blit(self.cursor_right_image, (dx + 70, dy))
+            self.message_engine.draw(screen, str(status[i]), (dx + 100, dy))
+
+        # text rect
+        pygame.draw.rect(screen, WHITE, self.text_rect, 0)
+        pygame.draw.rect(screen, BLACK, self.text_inner_rect, 0)
+
+        # draw cursor
+        if self.cursor_is_in == self.INVENTORY_RECT:
+            dx = self.inventory_rect.left
+            dy = self.inventory_rect.top
+            offset_x = 10 + 25 - self.hand_cursor_image.get_rect().width*0.5
+            offset_y = 20 + 25 - self.hand_cursor_image.get_rect().height*0.5
+            offset2_x = 50 * (self.cursor_position % 5)
+            offset2_y = 50 * int(self.cursor_position / 5)
+
+            # draw selected item if exists
+            if self.selected_item:
+                screen.blit(self.selected_item.image, (dx + offset_x + offset2_x, dy + offset_y + offset2_y))
+
+            if self.is_grabbing:
+                screen.blit(self.hand_cursor_grab_image, (dx + offset_x + offset2_x, dy + offset_y + offset2_y))
+            else:
+                screen.blit(self.hand_cursor_image, (dx + offset_x + offset2_x, dy + offset_y + offset2_y))
+        elif self.cursor_is_in == self.DROP_RECT:
+            dx = self.inventory_rect.left
+            dy = self.inventory_rect.top
+            offset_x = self.inventory_image.get_rect().width + 20
+            offset_y = self.inventory_image.get_rect().height - 30
+            offset2_x = self.drop_image.get_rect().width*0.5 - self.hand_cursor_image.get_rect().width*0.5
+            offset2_y = self.drop_image.get_rect().height*0.5 - self.hand_cursor_image.get_rect().height*0.5
+
+            # draw selected item if exists
+            if self.selected_item:
+                screen.blit(self.selected_item.image, (dx + offset_x + offset2_x, dy + offset_y + offset2_y))
+
+            if self.is_grabbing:
+                screen.blit(self.hand_cursor_grab_image, (dx + offset_x + offset2_x, dy + offset_y + offset2_y))
+            else:
+                screen.blit(self.hand_cursor_image, (dx + offset_x + offset2_x, dy + offset_y + offset2_y))
+        elif self.cursor_is_in == self.BAG_RECT:
+            dx = self.bag_rect.centerx
+            dy = self.bag_rect.top
+            offset_x = self.bag_image.get_rect().width * 0.5
+            offset2_x = 25 - self.hand_cursor_image.get_rect().width*0.5
+            offset2_y = 25 - self.hand_cursor_image.get_rect().height*0.5
+            offset3_x = 50 * self.cursor_position
+
+            # draw selected item if exists
+            if self.selected_item:
+                screen.blit(self.selected_item.image, (dx - offset_x + offset2_x + offset3_x, dy + offset2_y))
+
+            if self.is_grabbing:
+                screen.blit(self.hand_cursor_grab_image, (dx - offset_x + offset2_x + offset3_x, dy + offset2_y))
+            else:
+                screen.blit(self.hand_cursor_image, (dx - offset_x + offset2_x + offset3_x, dy + offset2_y))
+        elif self.cursor_is_in == self.EQUIPMENT_RECT:
+            if self.cursor_position % 2 == 0:
+                dx = self.equipment_rect.left
+                dy = self.equipment_rect.top
+                offset_x = 20
+                offset_y = 20
+                offset2_x = self.weapon_equipment_image.get_rect().width*0.5 - self.hand_cursor_image.get_rect().width*0.5
+                offset2_y = self.weapon_equipment_image.get_rect().height*0.5 - self.hand_cursor_image.get_rect().height*0.5
+            else:
+                dx = self.equipment_rect.right
+                dy = self.equipment_rect.top
+                offset_x = - 20 - 50
+                offset_y = 20
+                offset2_x = self.weapon_equipment_image.get_rect().width * 0.5 - self.hand_cursor_image.get_rect().width * 0.5
+                offset2_y = self.weapon_equipment_image.get_rect().height * 0.5 - self.hand_cursor_image.get_rect().height * 0.5
+
+            offset3_y = 20 + 50
+
+            # draw selected item if exists
+            if self.selected_item:
+                screen.blit(self.selected_item.image, (dx + offset_x + offset2_x,
+                             dy + offset_y + offset2_y + offset3_y * int(self.cursor_position / 2)))
+
+            if self.is_grabbing:
+                screen.blit(self.hand_cursor_grab_image,
+                            (dx + offset_x + offset2_x,
+                             dy + offset_y + offset2_y + offset3_y * int(self.cursor_position / 2)))
+            else:
+                screen.blit(self.hand_cursor_image,
+                            (dx + offset_x + offset2_x,
+                             dy + offset_y + offset2_y + offset3_y * int(self.cursor_position / 2)))
 
 
 if __name__ == "__main__":

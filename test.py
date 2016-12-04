@@ -43,7 +43,7 @@ def add_words_to_lines(file_name):
             print(new_line)
             output_file.write(new_line+"\n")
 
-add_words_to_lines("data/enemybatch.dat")
+# add_words_to_lines("data/enemybatch.dat")
 # add_id_to_lines("enemybatch.dat")
 # create_enemy_batch_dat()
 # add_rows_and_columns_to_character_chip_dat("data", "charachip.dat")
@@ -54,3 +54,6 @@ add_words_to_lines("data/enemybatch.dat")
 # pygame.init()
 # pygame.mixer.music.load("bgm/test2.ogg")
 # pygame.mixer.music.play(-1)
+
+list = (None, None, None)
+print(list[4])
