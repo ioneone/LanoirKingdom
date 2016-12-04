@@ -7,11 +7,11 @@ import struct
 
 SCREEN_RECT = Rect(0, 0, 640, 480)
 TILE_SIZE = 32
+BAR_SIZE = 50
 DOWN, LEFT, RIGHT, UP = 0, 1, 2, 3  # in the order of the image
 STOP, AUTO_MOVE, INPUT_MOVE = 0, 1, 2
 AUTO_MOVE_RATE = 0.05  # how often NPC moves
-ENCOUNTER_RATE = 0.5  # how often the player encounter a monster
-
+ENCOUNTER_RATE = 0.05  # how often the player encounter a monster
 SKILL_EFFECT_SIZE = 192
 
 TITLE, FILED, TALK, COMMAND, BATTLE_INIT, BATTLE_COMMAND, BATTLE_PROCESS, STATUS, SHOP, ITEM = range(10)
@@ -138,8 +138,7 @@ class pyRPG:
         self.item_window = ItemWindow(SCREEN_RECT, self.message_engine, self.party)
 
         self.title = Title(self.message_engine)
-
-        self.battle = Battle(self.party, self.message_window, self.message_engine)
+        self.battle = Battle(self.message_window, self.message_engine, self.party)
 
         global game_state
         game_state = TITLE
@@ -1473,6 +1472,7 @@ class Player(Character):
         self.moving = True
 
 
+
 class Window:
     EDGE_WIDTH = 4
 
@@ -1825,22 +1825,23 @@ class Battle:
 
     images = []
 
-    def __init__(self, party, message_window, message_engine):
+    def __init__(self, message_window, message_engine, party):
         self.message_window = message_window
         self.message_engine = message_engine
         self.command_window = BattleCommandWindow(Rect(96, 338, 136, 136), self.message_engine)
-        status = [["me", 16, 0],
-                  ["ally1", 15, 24],
-                  ["ally2", 10, 8],
-                  ["ally3", 8, 12]]
 
         self.party = party
+        players = []
+
+        for player in self.party.members:
+            players.append(player)
 
         self.battle_status_windows = []
-        self.battle_status_windows.append(BattleStatusWindow(Rect(90, 8, 104, 136), status[0], self.message_engine))
-        self.battle_status_windows.append(BattleStatusWindow(Rect(210, 8, 104, 136), status[1], self.message_engine))
-        self.battle_status_windows.append(BattleStatusWindow(Rect(330, 8, 104, 136), status[2], self.message_engine))
-        self.battle_status_windows.append(BattleStatusWindow(Rect(450, 8, 104, 136), status[3], self.message_engine))
+
+        self.battle_status_windows.append(BattleStatusWindow(50, 12, players[0], self.message_engine))
+        self.battle_status_windows.append(BattleStatusWindow(210, 12, players[1], self.message_engine))
+        self.battle_status_windows.append(BattleStatusWindow(370, 12, players[2], self.message_engine))
+        self.battle_status_windows.append(BattleStatusWindow(520, 12, players[3], self.message_engine))
 
         self.background_image = load_image("data", "grass.png")
         self.enemy = None
@@ -1921,14 +1922,28 @@ class BattleCommandWindow(Window):
 class BattleStatusWindow(Window):
     LINE_HEIGHT = 8
 
-    def __init__(self, rect, status, message_engine):
-        Window.__init__(self, rect)
-        self.text_rect = self.inner_rect.inflate(-32, -16)
-        self.status = status
+    def __init__(self, x, y, player, message_engine):
+        # Window.__init__(self, rect)
+        # self.text_rect = self.inner_rect.inflate(-32, -16)
+        self.x = x
+        self.y = y
+        self.player = player
         self.message_engine = message_engine
         self.frame = 0
+        self.health_percentage = self.player.current_health / self.player.health
+        self.buffer = 4
 
     def draw(self, screen):
+        pygame.draw.rect(screen, BLACK, Rect(self.x, self.y - self.buffer, BAR_SIZE * 2 + self.buffer, TILE_SIZE + (self.buffer * 5/2)))
+        # pygame.draw.rect(screen, BLACK, Rect(self.x, self.y, TILE_SIZE * 2, TILE_SIZE))
+        pygame.draw.rect(screen, Color(255, 45, 0, 0), Rect(self.x, self.y, BAR_SIZE * 2 * self.health_percentage, TILE_SIZE / 2))
+        pygame.draw.rect(screen, Color(0, 135, 255, 0), Rect(self.x, self.y + (TILE_SIZE / 2) + (self.buffer / 2), BAR_SIZE * 2 * self.health_percentage, TILE_SIZE / 2))
+        pygame.draw.circle(screen, BLACK, [self.x - 8, self.y + 16], 24)
+        screen.blit(Character.images[self.player.name][0], (self.x - 24, self.y))
+        health_status_info = str(self.player.current_health) + "/" + str(self.player.health)
+        mana_status_info = str(self.player.current_mana) + "/" + str(self.player.mana)
+        self.message_engine.draw_center(screen, health_status_info, Rect(self.x, self.y, BAR_SIZE * 2 * self.health_percentage, TILE_SIZE / 2))
+        self.message_engine.draw_center(screen, mana_status_info, Rect(self.x, self.y + (TILE_SIZE / 2) + (self.buffer / 2), BAR_SIZE * 2 * self.health_percentage, TILE_SIZE / 2))
         # Window.draw(self, screen)
         if not self.is_visible:
             return
@@ -1945,10 +1960,14 @@ class Class(Player):
     # Description: parameters for players
 
     def __init__(self, name, row, column, position, direction, is_leader, party,
-                 health, attack, intelligence, defence, magic_resistance, agility, critical_hit):
+
+                 health, mana, attack, intelligence, defence, magic_resistance, agility, critical_hit):
         Player.__init__(self, name, row, column, position, direction, is_leader, party)
         # parameters
         self.health = health
+        self.current_health = health
+        self.mana = mana
+        self.current_mana = mana
         self.attack = attack
         self.intelligence = intelligence
         self.defence = defence
@@ -1978,7 +1997,7 @@ class Knight(Class):
     # Description: parameters for Knight class
     def __init__(self, name, row, column, position, direction, is_leader, party):
         Class.__init__(self, name, row, column, position, direction, is_leader, party,
-                       16, 4, 0, 5, 3, 10, 8)
+                       16, 1, 4, 0, 5, 3, 10, 8)
         self.skills.append(Skill("Deadly Sins", "Attack12",
                                  "A seven hit skill that consists of various slashes, "
                                  "several full circle spins and a backwards somersault.",
@@ -1996,14 +2015,13 @@ class Knight(Class):
 
 
 
-
 class Mage(Class):
     # Author: Junhong Wang
     # Date: 2016/11/10
     # Description: parameters for Mage class
     def __init__(self, name, row, column, position, direction, is_leader, party):
         Class.__init__(self, name, row, column, position, direction, is_leader, party,
-                       16, 0, 4, 4, 6, 4, 1)
+                       16, 24, 0, 4, 4, 6, 4, 1)
         self.skills.append(Skill("Deadly Sins", "Attack1",
                                  "A seven hit skill that consists of various slashes, "
                                  "several full circle spins and a backwards somersault.",
@@ -2026,7 +2044,7 @@ class Tank(Class):
     # Description: parameters for Tank class
     def __init__(self, name, row, column, position, direction, is_leader, party):
         Class.__init__(self, name, row, column, position, direction, is_leader, party,
-                       16, 5, 0, 11, 1, 3, 1)
+                       16, 1, 5, 0, 11, 1, 3, 1)
         self.skills.append(Skill("Deadly Sins", "Attack1",
                                  "A seven hit skill that consists of various slashes, "
                                  "several full circle spins and a backwards somersault.",
@@ -2049,14 +2067,14 @@ class Assassin(Class):
     # Description: parameters for Assassin class
     def __init__(self, name, row, column, position, direction, is_leader, party):
         Class.__init__(self, name, row, column, position, direction, is_leader, party,
-                       16, 4, 0, 4, 2, 12, 10)
+                       16, 8, 4, 0, 4, 2, 12, 10)
         self.skills.append(Skill("Deadly Sins", "Attack1",
                                  "A seven hit skill that consists of various slashes, "
                                  "several full circle spins and a backwards somersault.",
                                  0, 7))
         self.skills.append(Skill("Horizontal", "Attack1",
                                  "A simple sword skill slashing horizontally.",
-                                 0, 2))
+                                 0, 2
         self.skills.append(Skill("Horizontal Arc", "Attack1",
                                  "A flat two-part skill that involves a horizontal swing from left to right, "
                                  "followed by another horizontal swing in from right to left.",
@@ -2072,7 +2090,7 @@ class Priest(Class):
     # Description: parameters for Priest class
     def __init__(self, name, row, column, position, direction, is_leader, party):
         Class.__init__(self, name, row, column, position, direction, is_leader, party,
-                       16, 0, 4, 3, 4, 4, 1)
+                       16, 10, 0, 4, 3, 4, 4, 1)
         self.skills.append(Skill("Deadly Sins", "Attack1",
                                  "A seven hit skill that consists of various slashes, "
                                  "several full circle spins and a backwards somersault.",
@@ -2122,6 +2140,7 @@ class Enemy:
 
 
 class PlayerStatusWindow(Window):
+
 
     # Author: Junhong Wang
     # Date: 2016/11/12
@@ -2381,6 +2400,7 @@ class PlayerStatusWindow(Window):
 
 class Skill:
 
+
     MAX_LIFE = 10
 
     def __init__(self, name, image_name, description, bonus_power, bonus_rate):
@@ -2412,9 +2432,11 @@ class Skill:
         screen.blit(image, center_rect)
         self.life -= 1
 
+
     def invoke(self):
         self.life = self.MAX_LIFE
         sounds["sword_slice"].play()
+
 
 
 class Shop:
