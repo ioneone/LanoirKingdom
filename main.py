@@ -1944,14 +1944,6 @@ class BattleStatusWindow(Window):
         mana_status_info = str(self.player.current_mana) + "/" + str(self.player.mana)
         self.message_engine.draw_center(screen, health_status_info, Rect(self.x, self.y, BAR_SIZE * 2 * self.health_percentage, TILE_SIZE / 2))
         self.message_engine.draw_center(screen, mana_status_info, Rect(self.x, self.y + (TILE_SIZE / 2) + (self.buffer / 2), BAR_SIZE * 2 * self.health_percentage, TILE_SIZE / 2))
-        # Window.draw(self, screen)
-        if not self.is_visible:
-            return
-        status_info = [str(self.status[0]), "H"+str(self.status[1]), "M"+str(self.status[2])]
-        for i in range(0, 3):
-            dx = self.text_rect[0]
-            dy = self.text_rect[1] + (self.LINE_HEIGHT+self.message_engine.font_height) * (i % 3)
-            self.message_engine.draw(screen, status_info[i], (dx, dy))
 
 
 class Class(Player):
