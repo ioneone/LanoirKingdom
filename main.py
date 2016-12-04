@@ -1095,7 +1095,7 @@ class Map:
 
     def load_event(self, directory):
         file_path = os.path.join(directory, self.name+".evt")
-        file = open(file_path)
+        file = open(file_path, encoding='utf8')
         for line in file:
             line = line.rstrip()  # remove new line
             if line.startswith("#"):
@@ -2074,7 +2074,7 @@ class Assassin(Class):
                                  0, 7))
         self.skills.append(Skill("Horizontal", "Attack1",
                                  "A simple sword skill slashing horizontally.",
-                                 0, 2
+                                 0, 2))
         self.skills.append(Skill("Horizontal Arc", "Attack1",
                                  "A flat two-part skill that involves a horizontal swing from left to right, "
                                  "followed by another horizontal swing in from right to left.",
