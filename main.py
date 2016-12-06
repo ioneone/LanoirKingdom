@@ -4,6 +4,7 @@ import sys
 import os
 import random
 import struct
+import copy
 
 SCREEN_RECT = Rect(0, 0, 640, 480)
 TILE_SIZE = 32
@@ -14,7 +15,7 @@ AUTO_MOVE_RATE = 0.05  # how often NPC moves
 ENCOUNTER_RATE = 0.05  # how often the player encounter a monster
 SKILL_EFFECT_SIZE = 192
 
-TITLE, FILED, TALK, COMMAND, BATTLE_INIT, BATTLE_COMMAND, BATTLE_PROCESS, STATUS, SHOP, ITEM = range(10)
+TITLE, FILLED, TALK, COMMAND, BATTLE_INIT, BATTLE_COMMAND, BATTLE_PROCESS, BATTLE_FINISH, STATUS, SHOP, ITEM = range(11)
 
 BLUE = (0, 0, 255)
 WHITE = (255, 255, 255)
@@ -23,6 +24,8 @@ RED = (255, 0, 0)
 ORANGE = (243, 152, 0)
 DARK_GREEN = (87, 144, 151)
 LIGHT_BLUE = (17, 248, 216)
+HP_RED = (255, 45, 0, 0)
+MANA_BLUE = (0, 135, 255, 0)
 
 full_screen_flag = False
 
@@ -120,10 +123,10 @@ class pyRPG:
         self.load_items("data", "itemicon.dat")
 
         self.party = Party()
-        player1 = Knight("swordman_female", 4, 4, (3, 5), DOWN, True, self.party)
-        player2 = Mage("elf_female2", 4, 4, (3, 4), DOWN, False, self.party)
-        player3 = Assassin("priestess", 4, 4, (3, 3), DOWN, False, self.party)
-        player4 = Priest("magician_female", 4, 4, (3, 2), DOWN, False, self.party)
+        player1 = Knight("swordman_female", "McKnighty", 4, 4, (3, 5), DOWN, True, self.party)
+        player2 = Mage("magician_female", "Dark Magician Girl", 4, 4, (3, 4), DOWN, False, self.party)
+        player3 = Assassin("butler", "Ezio", 4, 4, (3, 3), DOWN, False, self.party)
+        player4 = Tank("whiteknight_male", "I'm Catholic", 4, 4, (3, 2), DOWN, False, self.party)
         self.party.add(player1)
         self.party.add(player2)
         self.party.add(player3)
@@ -158,7 +161,7 @@ class pyRPG:
         global game_state
         if game_state == TITLE:
             self.title.input()
-        elif game_state == FILED:
+        elif game_state == FILLED:
             self.map.input()
             self.party.input(self.map, self.battle)
         elif game_state == TALK:
@@ -171,7 +174,7 @@ class pyRPG:
         global game_state
         if game_state == TITLE:
             self.title.update()
-        elif game_state == FILED or game_state == TALK or game_state == COMMAND:
+        elif game_state == FILLED or game_state == TALK or game_state == COMMAND:
             self.map.update()
             self.party.update()
         elif game_state == TALK:
@@ -187,7 +190,7 @@ class pyRPG:
         global game_state
         if game_state == TITLE:
             self.title.draw(self.screen)
-        elif game_state == FILED or game_state == TALK or game_state == COMMAND:
+        elif game_state == FILLED or game_state == TALK or game_state == COMMAND:
             offsets = self.calculate_offsets(self.party.members[0])
             self.map.draw(self.screen, offsets)
             self.party.draw(self.screen, offsets)
@@ -218,7 +221,7 @@ class pyRPG:
             global game_state
             if game_state == TITLE:
                 self.title_handler(event)
-            elif game_state == FILED:
+            elif game_state == FILLED:
                 self.field_handler(event)
             elif game_state == COMMAND:
                 self.command_window_handler(event)
@@ -230,6 +233,8 @@ class pyRPG:
                 self.battle_command_handler(event)
             elif game_state == BATTLE_PROCESS:
                 self.battle_process_handler(event)
+            elif game_state == BATTLE_FINISH:
+                self.battle_finish_handler(event)
             elif game_state == STATUS:
                 self.player_status_window_handler(event)
             elif game_state == SHOP:
@@ -249,7 +254,7 @@ class pyRPG:
                 Player.inventory[self.item_window.selected_item_position] = self.item_window.selected_item
                 self.item_window.selected_item = None
                 self.item_window.selected_item_position = None
-            game_state = FILED
+            game_state = FILLED
         if event.type == KEYDOWN and event.key == K_LEFT:
             if self.item_window.cursor_is_in == self.item_window.INVENTORY_RECT:
                 sounds["pi"].play()
@@ -515,7 +520,7 @@ class pyRPG:
             self.shop_window.is_grabbing = None
             self.shop_window.cursor_position = 0
             self.shop_window.cursor_in_shop_shelf = True
-            game_state = FILED
+            game_state = FILLED
             self.map.play_bgm()
             self.map.play_bgm()
         if event.type == KEYDOWN and event.key == K_UP:
@@ -681,12 +686,14 @@ class pyRPG:
                 return
             self.battle.command_window.command += 1
 
+
+
         if event.type == KEYDOWN and event.key == K_SPACE:
             sounds["pi"].play()
-            if self.battle.command_window.command == BattleCommandWindow.ATTACK:
+            if self.battle.command_window.command == BattleCommandWindow.BASIC:
                 self.message_window.set_message("player is attacking the monster")
-            elif self.battle.command_window.command == BattleCommandWindow.SPELL:
-                self.message_window.set_message("I don't know any spell")
+            if self.battle.command_window.command == BattleCommandWindow.SPECIAL:
+                self.message_window.set_message("player uses special move")
             elif self.battle.command_window.command == BattleCommandWindow.ITEM:
                 self.message_window.set_message("I don't have any item")
             elif self.battle.command_window.command == BattleCommandWindow.ESCAPE:
@@ -694,21 +701,87 @@ class pyRPG:
             self.battle.command_window.hide()
             game_state = BATTLE_PROCESS
 
+
+
     def battle_process_handler(self, event):
         global game_state
         if event.type == KEYDOWN and event.key == K_SPACE:
             self.message_window.hide()
             if self.battle.command_window.command == BattleCommandWindow.ESCAPE:
                 self.map.play_bgm()
-                game_state = FILED
-            elif self.battle.command_window.command == BattleCommandWindow.ATTACK:
-                self.battle.skill_effect = self.battle.party.members[0].skills[0]
+                game_state = FILLED
+            elif self.battle.command_window.command == BattleCommandWindow.BASIC:
+                if self.battle.command_window.player_turn == 3:
+                    self.battle.command_window.player_turn = 0
+
+                self.battle.skill_effect = self.battle.party.members[self.battle.command_window.player_turn].skills[0]
                 self.battle.skill_effect.invoke()
                 self.battle.command_window.show()
+
+                # self.battle.enemy.current_health -= self.battle.party.members[0].attack
+                damage = self.battle.party.members[self.battle.command_window.player_turn].attack - self.battle.enemy.defence if self.battle.party.members[self.battle.command_window.player_turn].attack - self.battle.enemy.defence > 0 else 1
+                self.battle.enemy.current_health -= damage
+
+                for battle_status_window in self.battle.battle_status_windows:
+                    # battle_status_window.update()
+                    battle_status_window.draw(self.screen)
+
+                # self.battle.enemy_status_window.update()
+                self.battle.enemy_status_window.draw(self.screen)
+                self.battle.command_window.player_turn += 1
+
+                if self.battle.enemy.current_health <= 0:
+                    if event.type == KEYDOWN and event.key == K_SPACE:
+                        game_state = BATTLE_FINISH
+                        return
+
+                game_state = BATTLE_COMMAND
+            elif self.battle.command_window.command == BattleCommandWindow.SPECIAL:
+                if self.battle.command_window.player_turn == 3:
+                    self.battle.command_window.player_turn = 0
+
+                self.battle.skill_effect = self.battle.party.members[self.battle.command_window.player_turn].skills[1]
+                self.battle.skill_effect.invoke()
+                self.battle.command_window.show()
+
+                damage = self.battle.party.members[self.battle.command_window.player_turn].intelligence - self.battle.enemy.magic_resistance if self.battle.party.members[self.battle.command_window.player_turn].intelligence - self.battle.enemy.magic_resistance > 0 else 1
+                self.battle.enemy.current_health -= damage
+
+                for battle_status_window in self.battle.battle_status_windows:
+                    # battle_status_window.update()
+                    battle_status_window.draw(self.screen)
+
+                # self.battle.enemy_status_window.update()
+                self.battle.enemy_status_window.draw(self.screen)
+                self.battle.command_window.player_turn += 1
+
+                if self.battle.enemy.current_health <= 0:
+                    if event.type == KEYDOWN and event.key == K_SPACE:
+                        self.message_window.set_message("You have gained xxxxx exp")
+                        game_state = TALK
+                        return
+
                 game_state = BATTLE_COMMAND
             else:
                 self.battle.command_window.show()
                 game_state = BATTLE_COMMAND
+
+    def battle_finish_handler(self, event):
+        self.battle.skill_effect = None
+        pygame.draw.rect(self.screen, BLACK, Rect(140, 334, 360, 140), 0)
+        pygame.draw.rect(self.screen, WHITE, Rect(140, 334, 360, 140), 5)
+
+        # self.message_window.hide()
+        # self.message_window.draw(self.screen)
+        # self.message_window.set_message(self.battle.enemy.name + " has fainted.")
+        # self.message_window.show()
+        self.message_engine.draw_center(self.screen, self.battle.enemy.name + " has fainted.", Rect(140, 334, 360, 140))
+        self.message_window.hide()
+
+        if event.type == KEYDOWN and event.key == K_SPACE:
+            global game_state
+            game_state = FILLED
+
 
     def battle_init_handler(self, event):
         if event.type == KEYDOWN and event.key == K_SPACE:
@@ -735,7 +808,7 @@ class pyRPG:
             sounds["pi"].play()
             if self.title.menu == Title.START:
                 global game_state
-                game_state = FILED
+                game_state = FILLED
                 self.map.create("data", "test2")
             elif self.title.menu == Title.CONTINUE:
                 pass
@@ -807,7 +880,7 @@ class pyRPG:
                     if door:
                         door.open()
                         self.map.remove_event(door)
-                        game_state = FILED
+                        game_state = FILLED
                     else:
                         self.message_window.set_message("There's no door there")
                         game_state = TALK
@@ -838,7 +911,7 @@ class pyRPG:
         if event.type == KEYDOWN and event.key == K_SPACE:
             if not self.message_window.next():
                 global game_state
-                game_state = FILED
+                game_state = FILLED
 
     def player_status_window_handler(self, event):
         # Author: Junhong Wang
@@ -861,7 +934,7 @@ class pyRPG:
                 self.player_status_window.selection = self.player_status_window.STATUS_WINDOW
                 self.player_status_window.page = 0
                 global game_state
-                game_state = FILED
+                game_state = FILLED
                 self.map.play_bgm()
         elif event.type == KEYDOWN and event.key == K_LEFT:
             if not self.player_status_window.selection == self.player_status_window.STATUS_WINDOW \
@@ -1005,6 +1078,7 @@ class pyRPG:
             id = data[0]
             name = data[1]
             health = data[2]
+            mana = data[4]
             attack = data[3]
             intelligence = data[4]
             defence = data[5]
@@ -1012,7 +1086,7 @@ class pyRPG:
             agility = data[7]
             critical_hit = data[8]
             experience = data[9]
-            Map.enemy_batch.append(Enemy(id, name, health, attack, intelligence, defence, magic_resistance, agility, critical_hit, experience))
+            Map.enemy_batch.append(Enemy(id, name, mana, health, attack, intelligence, defence, magic_resistance, agility, critical_hit, experience))
         file.close()
 
 
@@ -1158,23 +1232,25 @@ class Map:
 
     def create_character(self, data):
         name = data[1]
+        nickname = ""
         row, column = int(data[2]), int(data[3])
         x, y = int(data[4]), int(data[5])
         direction = int(data[6])
         move_type = int(data[7])
         message = data[8]
-        character = Character(name, row, column, (x, y), direction, move_type, message)
+        character = Character(name, nickname, row, column, (x, y), direction, move_type, message)
         self.characters.append(character)
 
     def create_clerk_event(self, data):
         name = data[1]
+        nickname = "Shopkeeper"
         row, column = int(data[2]), int(data[3])
         x, y = int(data[4]), int(data[5])
         direction = int(data[6])
         move_type = int(data[7])
         message = data[8]
         shop = Shop(data[9])
-        clerk = Clerk(name, row, column, (x, y), direction, move_type, message, shop)
+        clerk = Clerk(name, nickname, row, column, (x, y), direction, move_type, message, shop)
         self.characters.append(clerk)
 
     def create_enemy(self, data):
@@ -1219,8 +1295,9 @@ class Character:
     frame = 0
     images = {}
 
-    def __init__(self, name, row, column, position, direction, move_type, message):
+    def __init__(self, name, nickname, row, column, position, direction, move_type, message):
         self.name = name
+        self.nickname = nickname
         self.row = row
         self.column = column
         self.image = self.images[name][0]
@@ -1357,8 +1434,8 @@ class Player(Character):
     inventory = [None] * 25
     gold = 500
 
-    def __init__(self, name, row, column, position, direction, is_leader, party):
-        Character.__init__(self, name, row, column, position, direction, INPUT_MOVE, None)
+    def __init__(self, name, nickname, row, column, position, direction, is_leader, party):
+        Character.__init__(self, name, nickname, row, column, position, direction, INPUT_MOVE, None)
         self.is_leader = is_leader
         self.party = party
         self.bag = [None] * 5
@@ -1828,13 +1905,14 @@ class Battle:
     def __init__(self, message_window, message_engine, party):
         self.message_window = message_window
         self.message_engine = message_engine
-        self.command_window = BattleCommandWindow(Rect(96, 338, 136, 136), self.message_engine)
-
         self.party = party
         players = []
 
         for player in self.party.members:
             players.append(player)
+
+
+        self.command_window = BattleCommandWindow(Rect(10, 338, 136, 136), players, self.message_engine)
 
         self.battle_status_windows = []
 
@@ -1845,6 +1923,7 @@ class Battle:
 
         self.background_image = load_image("data", "grass.png")
         self.enemy = None
+        self.enemy_status_window = None
 
         self.skill_effect = None
 
@@ -1853,12 +1932,18 @@ class Battle:
         for battle_status_window in self.battle_status_windows:
             battle_status_window.hide()
 
-        self.message_window.set_message("encounter an enemy")
+        self.enemy = map.enemies[random.randrange(len(map.enemies))].copy()
+        # self.enemy = copy.deepcopy(map.enemies[random.randrange(len(map.enemies))])
+
+        self.message_window.set_message("A wild " + self.enemy.name + "!")
         self.play_bgm()
 
-        self.enemy = map.enemies[random.randrange(len(map.enemies))]
 
     def update(self):
+        for battle_status_window in self.battle_status_windows:
+            battle_status_window.update()
+
+        self.enemy_status_window.update()
         pass
 
     def draw(self, screen):
@@ -1869,15 +1954,10 @@ class Battle:
             if self.skill_effect.life:
                 self.skill_effect.draw(screen)
         self.command_window.draw(screen)
+        self.enemy_status_window = EnemyStatusWindow(self.enemy, self.message_engine)
+        self.enemy_status_window.draw(screen)
         for battle_status_window in self.battle_status_windows:
             battle_status_window.draw(screen)
-
-
-
-        # test
-        # image = load_image("skilleffect", "attack1.png")
-        # screen.blit(image, (0, 0))
-
 
     def play_bgm(self):
         bgm_file_name = "battle.ogg"
@@ -1888,16 +1968,20 @@ class Battle:
 
 class BattleCommandWindow(Window):
     LINE_HEIGHT = 8
-    ATTACK, SPELL, ITEM, ESCAPE = 0, 1, 2, 3
-    COMMAND = ["battle", "spell", "item", "run"]
+    BASIC, SPECIAL, ITEM, ESCAPE = 0, 1, 2, 3
+    COMMAND = ["basic", "special", "item", "run"]
 
-    def __init__(self, rect, message_engine):
+    def __init__(self, rect, players, message_engine):
         Window.__init__(self, rect)
-        self.command = self.ATTACK
+        self.command = self.BASIC
+        self.player_turn = 0
         self.text_rect = self.inner_rect.inflate(-32, -16)
         self.message_engine = message_engine
         self.cursor = load_image("data", "cursor2.png")
         self.frame = 0
+        self.turn = 0
+        self.players = players
+        # self.selected_player = self.players[self.page]
 
     def draw(self, screen):
         Window.draw(self, screen)
@@ -1915,8 +1999,11 @@ class BattleCommandWindow(Window):
         screen.blit(self.cursor, (dx, dy))
 
     def show(self):
-        self.command = self.ATTACK
+        self.command = self.BASIC
         self.is_visible = True
+
+    def update(self):
+        pass
 
 
 class BattleStatusWindow(Window):
@@ -1930,31 +2017,61 @@ class BattleStatusWindow(Window):
         self.player = player
         self.message_engine = message_engine
         self.frame = 0
-        self.health_percentage = self.player.current_health / self.player.health
+        # self.health_percentage = self.player.current_health / self.player.health
+        # self.mana_percentage = self.player.current_mana / self.player.mana
         self.buffer = 4
 
     def draw(self, screen):
+        current_health = self.player.current_health if self.player.current_health >= 0 else 0
+        current_mana = self.player.current_mana if self.player.current_mana >= 0 else 0
+        health_percentage = current_health / self.player.health
+        mana_percentage = current_mana / self.player.mana
+
         pygame.draw.rect(screen, BLACK, Rect(self.x, self.y - self.buffer, BAR_SIZE * 2 + self.buffer, TILE_SIZE + (self.buffer * 5/2)))
         # pygame.draw.rect(screen, BLACK, Rect(self.x, self.y, TILE_SIZE * 2, TILE_SIZE))
-        pygame.draw.rect(screen, Color(255, 45, 0, 0), Rect(self.x, self.y, BAR_SIZE * 2 * self.health_percentage, TILE_SIZE / 2))
-        pygame.draw.rect(screen, Color(0, 135, 255, 0), Rect(self.x, self.y + (TILE_SIZE / 2) + (self.buffer / 2), BAR_SIZE * 2 * self.health_percentage, TILE_SIZE / 2))
+        pygame.draw.rect(screen, HP_RED, Rect(self.x, self.y, BAR_SIZE * 2 * health_percentage, TILE_SIZE / 2))
+        pygame.draw.rect(screen, MANA_BLUE, Rect(self.x, self.y + (TILE_SIZE / 2) + (self.buffer / 2), BAR_SIZE * 2 * mana_percentage, TILE_SIZE / 2))
         pygame.draw.circle(screen, BLACK, [self.x - 8, self.y + 16], 24)
-        screen.blit(Character.images[self.player.name][0], (self.x - 24, self.y))
+        self.player.direction = DOWN
+        screen.blit(self.player.image, (self.x - 24, self.y))
+        self.player.update()
         health_status_info = str(self.player.current_health) + "/" + str(self.player.health)
         mana_status_info = str(self.player.current_mana) + "/" + str(self.player.mana)
-        self.message_engine.draw_center(screen, health_status_info, Rect(self.x, self.y, BAR_SIZE * 2 * self.health_percentage, TILE_SIZE / 2))
-        self.message_engine.draw_center(screen, mana_status_info, Rect(self.x, self.y + (TILE_SIZE / 2) + (self.buffer / 2), BAR_SIZE * 2 * self.health_percentage, TILE_SIZE / 2))
+        self.message_engine.draw_center(screen, health_status_info, Rect(self.x, self.y, BAR_SIZE * 2, TILE_SIZE / 2))
+        self.message_engine.draw_center(screen, mana_status_info, Rect(self.x, self.y + (TILE_SIZE / 2) + (self.buffer / 2), BAR_SIZE * 2, TILE_SIZE / 2))
 
+    def update(self):
+        # screen.blit(Character.images[self.player.name][1], (self.x - 24, self.y + 2))
+        pass
+
+class EnemyStatusWindow(Window):
+    X = 250
+    Y = 120
+
+    def __init__(self, enemy, message_engine):
+        self.enemy = enemy
+        self.message_engine = message_engine
+
+    def draw(self, screen):
+        current_health = self.enemy.current_health if self.enemy.current_health >= 0 else 0
+        health_percentage = current_health / self.enemy.health
+        health_status_info = str(current_health) + "/" + str(self.enemy.health)
+        pygame.draw.rect(screen, BLACK, Rect(self.X - 5, self.Y - 5, 160, (TILE_SIZE / 2) + 10))
+        pygame.draw.rect(screen, HP_RED, Rect(self.X, self.Y, BAR_SIZE * 3 * health_percentage, TILE_SIZE / 2))
+        self.message_engine.draw_center(screen, health_status_info, Rect(self.X, self.Y, BAR_SIZE * 3, TILE_SIZE / 2))
+        self.message_engine.draw_center(screen, self.enemy.name, Rect(self.X, self.Y - 16 - 5, BAR_SIZE * 3, TILE_SIZE / 2))
+
+    def update(self):
+        pass
 
 class Class(Player):
     # Author: Junhong Wang
     # Date: 2016/11/10
     # Description: parameters for players
 
-    def __init__(self, name, row, column, position, direction, is_leader, party,
-
+    def __init__(self, name, nickname, row, column, position, direction, is_leader, party,
                  health, mana, attack, intelligence, defence, magic_resistance, agility, critical_hit):
-        Player.__init__(self, name, row, column, position, direction, is_leader, party)
+        Player.__init__(self, name, nickname, row, column, position, direction, is_leader, party)
         # parameters
         self.health = health
         self.current_health = health
@@ -1983,111 +2100,79 @@ class Class(Player):
         self.boots = None
         self.accessory = None
 
+
 class Knight(Class):
     # Author: Junhong Wang
     # Date: 2016/11/10
     # Description: parameters for Knight class
-    def __init__(self, name, row, column, position, direction, is_leader, party):
-        Class.__init__(self, name, row, column, position, direction, is_leader, party,
-                       16, 1, 4, 0, 5, 3, 10, 8)
-        self.skills.append(Skill("Deadly Sins", "Attack12",
-                                 "A seven hit skill that consists of various slashes, "
-                                 "several full circle spins and a backwards somersault.",
+    def __init__(self, name, nickname, row, column, position, direction, is_leader, party):
+        Class.__init__(self, name, nickname, row, column, position, direction, is_leader, party,
+                       45, 1, 5, 0, 5, 3, 10, 8)
+        self.skills.append(Skill("Cut", "Sword5",
+                                 "Various slashes paperlike cuts",
                                  0, 7))
-        self.skills.append(Skill("Horizontal", "Attack1",
-                                 "A simple sword skill slashing horizontally.",
+        self.skills.append(Skill("Super Cut", "Sword4",
+                                 "It is like cut, but with a little lighting.",
                                  0, 2))
-        self.skills.append(Skill("Horizontal Arc", "Attack1",
-                                 "A flat two-part skill that involves a horizontal swing from left to right, "
-                                 "followed by another horizontal swing in from right to left.",
-                                 0, 3))
-        self.skills.append(Skill("Horizontal Square", "Attack1",
-                                 "A mid-level sword skill tracing the shape of a rhombus.",
-                                 0, 4))
-
 
 
 class Mage(Class):
     # Author: Junhong Wang
     # Date: 2016/11/10
     # Description: parameters for Mage class
-    def __init__(self, name, row, column, position, direction, is_leader, party):
-        Class.__init__(self, name, row, column, position, direction, is_leader, party,
-                       16, 24, 0, 4, 4, 6, 4, 1)
-        self.skills.append(Skill("Deadly Sins", "Attack1",
-                                 "A seven hit skill that consists of various slashes, "
-                                 "several full circle spins and a backwards somersault.",
+    def __init__(self, name, nickname, row, column, position, direction, is_leader, party):
+        Class.__init__(self, name, nickname, row, column, position, direction, is_leader, party,
+                       25, 24, 1, 5, 4, 6, 4, 1)
+        self.skills.append(Skill("Fireball", "Fire1",
+                                 "A small poof.",
                                  0, 7))
-        self.skills.append(Skill("Horizontal", "Attack1",
-                                 "A simple sword skill slashing horizontally.",
+        self.skills.append(Skill("Fireblast", "Fire2",
+                                 "A bigger POOF!",
                                  0, 2))
-        self.skills.append(Skill("Horizontal Arc", "Attack1",
-                                 "A flat two-part skill that involves a horizontal swing from left to right, "
-                                 "followed by another horizontal swing in from right to left.",
-                                 0, 3))
-        self.skills.append(Skill("Horizontal Square", "Attack1",
-                                 "A mid-level sword skill tracing the shape of a rhombus.",
-                                 0, 4))
 
 
 class Tank(Class):
     # Author: Junhong Wang
     # Date: 2016/11/10
     # Description: parameters for Tank class
-    def __init__(self, name, row, column, position, direction, is_leader, party):
-        Class.__init__(self, name, row, column, position, direction, is_leader, party,
-                       16, 1, 5, 0, 11, 1, 3, 1)
-        self.skills.append(Skill("Deadly Sins", "Attack1",
-                                 "A seven hit skill that consists of various slashes, "
-                                 "several full circle spins and a backwards somersault.",
+    def __init__(self, name, nickname, row, column, position, direction, is_leader, party):
+        Class.__init__(self, name, nickname, row, column, position, direction, is_leader, party,
+                       55, 1, 5, 0, 11, 1, 3, 1)
+        self.skills.append(Skill("Exploding Rocks", "Earth1",
+                                 "That rock just exploded!",
                                  0, 7))
-        self.skills.append(Skill("Horizontal", "Attack1",
-                                 "A simple sword skill slashing horizontally.",
+        self.skills.append(Skill("Raising Mountains", "Earth2",
+                                 "A Mountain comes up from the ground.",
                                  0, 2))
-        self.skills.append(Skill("Horizontal Arc", "Attack1",
-                                 "A flat two-part skill that involves a horizontal swing from left to right, "
-                                 "followed by another horizontal swing in from right to left.",
-                                 0, 3))
-        self.skills.append(Skill("Horizontal Square", "Attack1",
-                                 "A mid-level sword skill tracing the shape of a rhombus.",
-                                 0, 4))
 
 
 class Assassin(Class):
     # Author: Junhong Wang
     # Date: 2016/11/10
     # Description: parameters for Assassin class
-    def __init__(self, name, row, column, position, direction, is_leader, party):
-        Class.__init__(self, name, row, column, position, direction, is_leader, party,
-                       16, 8, 4, 0, 4, 2, 12, 10)
-        self.skills.append(Skill("Deadly Sins", "Attack1",
-                                 "A seven hit skill that consists of various slashes, "
-                                 "several full circle spins and a backwards somersault.",
+    def __init__(self, name, nickname, row, column, position, direction, is_leader, party):
+        Class.__init__(self, name, nickname, row, column, position, direction, is_leader, party,
+                       30, 8, 4, 0, 4, 2, 12, 10)
+        self.skills.append(Skill("Knife with fire", "Sword2",
+                                 "That is a hot knife.",
                                  0, 7))
-        self.skills.append(Skill("Horizontal", "Attack1",
-                                 "A simple sword skill slashing horizontally.",
+        self.skills.append(Skill("Knife with ice", "Sword3",
+                                 "That is a cool knife.",
                                  0, 2))
-        self.skills.append(Skill("Horizontal Arc", "Attack1",
-                                 "A flat two-part skill that involves a horizontal swing from left to right, "
-                                 "followed by another horizontal swing in from right to left.",
-                                 0, 3))
-        self.skills.append(Skill("Horizontal Square", "Attack1",
-                                 "A mid-level sword skill tracing the shape of a rhombus.",
-                                 0, 4))
 
 
 class Priest(Class):
     # Author: Junhong Wang
     # Date: 2016/11/10
     # Description: parameters for Priest class
-    def __init__(self, name, row, column, position, direction, is_leader, party):
-        Class.__init__(self, name, row, column, position, direction, is_leader, party,
-                       16, 10, 0, 4, 3, 4, 4, 1)
-        self.skills.append(Skill("Deadly Sins", "Attack1",
+    def __init__(self, name, nickname, row, column, position, direction, is_leader, party):
+        Class.__init__(self, name, nickname, row, column, position, direction, is_leader, party,
+                       30, 10, 0, 4, 3, 4, 4, 1)
+        self.skills.append(Skill("Deadly Sins", "Blow1",
                                  "A seven hit skill that consists of various slashes, "
                                  "several full circle spins and a backwards somersault.",
                                  0, 7))
-        self.skills.append(Skill("Horizontal", "Attack1",
+        self.skills.append(Skill("Horizontal", "Blow3",
                                  "A simple sword skill slashing horizontally.",
                                  0, 2))
         self.skills.append(Skill("Horizontal Arc", "Attack1",
@@ -2105,23 +2190,31 @@ class Enemy:
     # Description: parameters for enemy
 
     def __init__(self, id, name,
-                 health, attack, intelligence, defence, magic_resistance, agility, critical_hit, experience):
+                 health, mana, attack, intelligence, defence, magic_resistance, agility, critical_hit, experience):
         self.id = id
         self.name = name
         self.image = load_image("enemybatch", name+".png")
-        self.health = health
-        self.attack = attack
-        self.intelligence = intelligence
-        self.defence = defence
-        self.magic_resistance = magic_resistance
-        self.agility = agility
-        self.critical_hit = critical_hit
-        self.experience = experience
+        self.health = int(health)
+        self.current_health = int(health)
+        self.mana = int(intelligence)
+        self.attack = int(attack)
+        self.intelligence = int(intelligence)
+        self.defence = int(defence)
+        self.magic_resistance = int(magic_resistance)
+        self.agility = int(agility)
+        self.critical_hit = int(critical_hit)
+        self.experience = int(experience)
         self.level = 1
+
+    def copy(self):
+        return Enemy(self.id, self.name, self.health, self.mana, self.attack, self.intelligence, self.defence,
+                      self.magic_resistance,
+                      self.agility, self.critical_hit, self.experience)
 
     def set_level(self, level):
         self.level = level
         self.health *= level
+        self.current_health = int(self.health)
         self.attack *= level
         self.intelligence *= level
         self.defence *= level
@@ -2416,7 +2509,7 @@ class Skill:
         # print(index)
         center_rect = self.images[index].get_rect(center=SCREEN_RECT.center)
         blend_factor = self.life % (self.MAX_LIFE / len(self.images))
-        print(blend_factor)
+        #print(blend_factor)
         if index + 1 < len(self.images):
             image = blend_image(self.images[index], self.images[index+1], blend_factor)
         else:
@@ -2428,7 +2521,6 @@ class Skill:
     def invoke(self):
         self.life = self.MAX_LIFE
         sounds["sword_slice"].play()
-
 
 
 class Shop:
@@ -2455,8 +2547,8 @@ class Shop:
 
 class Clerk(Character):
 
-    def __init__(self, name, row, column, position, direction, move_type, message, shop):
-        Character.__init__(self, name, row, column, position, direction, move_type, message)
+    def __init__(self, name, nickname, row, column, position, direction, move_type, message, shop):
+        Character.__init__(self, name, nickname, row, column, position, direction, move_type, message)
         self.shop = shop
 
 
