@@ -1,0 +1,22 @@
+# event file
+# test2.evt
+# CHARACTER,name,row,column,position,direction,move_type,message
+# MOVE,x,y,map_chip_id,destination_map,destination_x,destination_y
+# BGM,file_name
+# Enemy,id,level
+# CLERK,name,row,column,position,direction,move_type,message,shop_name
+
+CHARACTER,king,4,4,2,1,0,0,I'm ling
+CHARACTER,minister,4,4,3,1,0,1,I'm minister
+CHARACTER,soldier,4,4,4,1,0,1,I'm soldier
+CLERK,middle_male2,4,4,4,4,0,0,this is the weapon shop,wpshop
+MOVE,5,5,24,castle,7,14
+MOVE,6,5,25,castle,8,14
+MOVE,5,6,26,castle,7,14
+MOVE,6,6,27,castle,8,14
+MOVE,7,8,28,town,1,13
+BGM,test2
+Enemy,0,1
+Enemy,2,1
+Enemy,4,1
+Enemy,3,1
