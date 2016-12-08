@@ -12,10 +12,13 @@ BAR_SIZE = 50
 DOWN, LEFT, RIGHT, UP = 0, 1, 2, 3  # in the order of the image
 STOP, AUTO_MOVE, INPUT_MOVE = 0, 1, 2
 AUTO_MOVE_RATE = 0.05  # how often NPC moves
-ENCOUNTER_RATE = 0.05  # how often the player encounter a monster
+ENCOUNTER_RATE = 0.5  # how often the player encounter a monster
 SKILL_EFFECT_SIZE = 192
 
-TITLE, FILLED, TALK, COMMAND, BATTLE_INIT, BATTLE_COMMAND, BATTLE_PROCESS, BATTLE_FINISH, STATUS, SHOP, ITEM = range(11)
+# game state
+TITLE, FILLED, TALK, COMMAND, \
+BATTLE_INIT, BATTLE_COMMAND, BATTLE_PROCESS, BATTLE_ANIMATION, BATTLE_FINISH, \
+STATUS, SHOP, ITEM = range(12)
 
 BLUE = (0, 0, 255)
 WHITE = (255, 255, 255)
@@ -150,6 +153,7 @@ class pyRPG:
     def game_loop(self):
         clock = pygame.time.Clock()
         while True:
+            # print(game_state)
             clock.tick(60)
             self.input()
             self.update()
@@ -166,7 +170,7 @@ class pyRPG:
             self.party.input(self.map, self.battle)
         elif game_state == TALK:
             self.message_window.update()
-        elif game_state == BATTLE_INIT or game_state == BATTLE_COMMAND or game_state == BATTLE_PROCESS:
+        elif game_state == BATTLE_INIT or game_state == BATTLE_COMMAND or game_state == BATTLE_PROCESS or game_state == BATTLE_ANIMATION or game_state == BATTLE_FINISH:
             self.battle.update()
             self.message_window.update()
 
@@ -197,7 +201,7 @@ class pyRPG:
             self.message_window.draw(self.screen)
             self.command_window.draw(self.screen)
             self.show_info()
-        elif game_state in (BATTLE_INIT, BATTLE_COMMAND, BATTLE_PROCESS):
+        elif game_state in (BATTLE_INIT, BATTLE_COMMAND, BATTLE_PROCESS, BATTLE_ANIMATION, BATTLE_FINISH):
             self.battle.draw(self.screen)
             self.message_window.draw(self.screen)
         elif game_state == STATUS:
@@ -233,6 +237,8 @@ class pyRPG:
                 self.battle_command_handler(event)
             elif game_state == BATTLE_PROCESS:
                 self.battle_process_handler(event)
+            elif game_state == BATTLE_ANIMATION:
+                self.battle_animation_handler(event)
             elif game_state == BATTLE_FINISH:
                 self.battle_finish_handler(event)
             elif game_state == STATUS:
@@ -241,6 +247,34 @@ class pyRPG:
                 self.shop_window_handler(event)
             elif game_state == ITEM:
                 self.item_window_handler(event)
+
+    def battle_finish_handler(self, event):
+        global game_state
+        if event.type == KEYDOWN and event.key == K_SPACE:
+            if not self.message_window.next_flag:
+                global game_state
+                game_state = FILLED
+                self.message_window.hide()
+            else:
+                self.message_window.next()
+
+    def battle_animation_handler(self, event):
+        global game_state
+        if self.battle.skill_invoke_flag:
+            self.battle.skill_effect.invoke()
+            self.battle.skill_invoke_flag = False
+            self.battle.enemy.current_health -= 5
+
+        if self.battle.skill_effect.die_flag:
+            self.battle.skill_effect.reset()
+            if self.battle.enemy.current_health > 0:
+                self.battle.message_window.hide()
+                self.battle.command_window.show()
+                game_state = BATTLE_COMMAND
+            else:
+                self.battle.message_window.set_message("The monster is dead.%"
+                                                       "You gained xxxxx exp.")
+                game_state = BATTLE_FINISH
 
     def item_window_handler(self, event):
         global game_state
@@ -686,102 +720,51 @@ class pyRPG:
                 return
             self.battle.command_window.command += 1
 
-
-
         if event.type == KEYDOWN and event.key == K_SPACE:
             sounds["pi"].play()
             if self.battle.command_window.command == BattleCommandWindow.BASIC:
-                self.message_window.set_message("player is attacking the monster")
-            if self.battle.command_window.command == BattleCommandWindow.SPECIAL:
-                self.message_window.set_message("player uses special move")
+                self.battle.message_window.set_message("player is attacking the monster")
+                self.battle.skill_effect = self.battle.party.members[0].skills[0]
+            elif self.battle.command_window.command == BattleCommandWindow.SPECIAL:
+                self.battle.message_window.set_message("player uses special move")
+                self.battle.skill_effect = self.battle.party.members[0].skills[0]
             elif self.battle.command_window.command == BattleCommandWindow.ITEM:
-                self.message_window.set_message("I don't have any item")
+                self.battle.message_window.set_message("I don't have any item")
             elif self.battle.command_window.command == BattleCommandWindow.ESCAPE:
-                self.message_window.set_message("Run!")
+                self.battle.message_window.set_message("Run!")
             self.battle.command_window.hide()
             game_state = BATTLE_PROCESS
 
-
-
     def battle_process_handler(self, event):
         global game_state
-        if event.type == KEYDOWN and event.key == K_SPACE:
-            self.message_window.hide()
-            if self.battle.command_window.command == BattleCommandWindow.ESCAPE:
-                self.map.play_bgm()
-                game_state = FILLED
-            elif self.battle.command_window.command == BattleCommandWindow.BASIC:
-                if self.battle.command_window.player_turn == 3:
-                    self.battle.command_window.player_turn = 0
+        if self.battle.enemy.health <= 0:
 
-                self.battle.skill_effect = self.battle.party.members[self.battle.command_window.player_turn].skills[0]
-                self.battle.skill_effect.invoke()
-                self.battle.command_window.show()
+            # if event.type == KEYDOWN and event.key == K_SPACE:
+            #     if self.battle.message_window.next_flag:
+            #         self.battle.message_window.next()
+            #     else:
+            #         game_state = FILLED
+            pass
 
-                # self.battle.enemy.current_health -= self.battle.party.members[0].attack
-                damage = self.battle.party.members[self.battle.command_window.player_turn].attack - self.battle.enemy.defence if self.battle.party.members[self.battle.command_window.player_turn].attack - self.battle.enemy.defence > 0 else 1
-                self.battle.enemy.current_health -= damage
+        else:
+            if event.type == KEYDOWN and event.key == K_SPACE:
+                if self.battle.command_window.command == BattleCommandWindow.ESCAPE:
+                    self.map.play_bgm()
+                    self.battle.message_window.hide()
+                    game_state = FILLED
+                elif self.battle.command_window.command == BattleCommandWindow.BASIC:
 
-                for battle_status_window in self.battle.battle_status_windows:
-                    # battle_status_window.update()
-                    battle_status_window.draw(self.screen)
+                    if self.battle.message_window.hide_flag:
+                        self.battle.skill_invoke_flag = True
+                        game_state = BATTLE_ANIMATION
 
-                # self.battle.enemy_status_window.update()
-                self.battle.enemy_status_window.draw(self.screen)
-                self.battle.command_window.player_turn += 1
+                elif self.battle.command_window.command == BattleCommandWindow.SPECIAL:
 
-                if self.battle.enemy.current_health <= 0:
-                    if event.type == KEYDOWN and event.key == K_SPACE:
-                        game_state = BATTLE_FINISH
-                        return
+                    game_state = BATTLE_ANIMATION
 
-                game_state = BATTLE_COMMAND
-            elif self.battle.command_window.command == BattleCommandWindow.SPECIAL:
-                if self.battle.command_window.player_turn == 3:
-                    self.battle.command_window.player_turn = 0
+                elif self.battle.command_window.command == BattleCommandWindow.ITEM:
 
-                self.battle.skill_effect = self.battle.party.members[self.battle.command_window.player_turn].skills[1]
-                self.battle.skill_effect.invoke()
-                self.battle.command_window.show()
-
-                damage = self.battle.party.members[self.battle.command_window.player_turn].intelligence - self.battle.enemy.magic_resistance if self.battle.party.members[self.battle.command_window.player_turn].intelligence - self.battle.enemy.magic_resistance > 0 else 1
-                self.battle.enemy.current_health -= damage
-
-                for battle_status_window in self.battle.battle_status_windows:
-                    # battle_status_window.update()
-                    battle_status_window.draw(self.screen)
-
-                # self.battle.enemy_status_window.update()
-                self.battle.enemy_status_window.draw(self.screen)
-                self.battle.command_window.player_turn += 1
-
-                if self.battle.enemy.current_health <= 0:
-                    if event.type == KEYDOWN and event.key == K_SPACE:
-                        self.message_window.set_message("You have gained xxxxx exp")
-                        game_state = TALK
-                        return
-
-                game_state = BATTLE_COMMAND
-            else:
-                self.battle.command_window.show()
-                game_state = BATTLE_COMMAND
-
-    def battle_finish_handler(self, event):
-        self.battle.skill_effect = None
-        pygame.draw.rect(self.screen, BLACK, Rect(140, 334, 360, 140), 0)
-        pygame.draw.rect(self.screen, WHITE, Rect(140, 334, 360, 140), 5)
-
-        # self.message_window.hide()
-        # self.message_window.draw(self.screen)
-        # self.message_window.set_message(self.battle.enemy.name + " has fainted.")
-        # self.message_window.show()
-        self.message_engine.draw_center(self.screen, self.battle.enemy.name + " has fainted.", Rect(140, 334, 360, 140))
-        self.message_window.hide()
-
-        if event.type == KEYDOWN and event.key == K_SPACE:
-            global game_state
-            game_state = FILLED
-
+                    game_state = BATTLE_COMMAND
 
     def battle_init_handler(self, event):
         if event.type == KEYDOWN and event.key == K_SPACE:
@@ -909,9 +892,12 @@ class pyRPG:
 
     def talk_handler(self, event):
         if event.type == KEYDOWN and event.key == K_SPACE:
-            if not self.message_window.next():
+            if not self.message_window.next_flag:
                 global game_state
                 game_state = FILLED
+                self.message_window.hide()
+            else:
+                self.message_window.next()
 
     def player_status_window_handler(self, event):
         # Author: Junhong Wang
@@ -1549,7 +1535,6 @@ class Player(Character):
         self.moving = True
 
 
-
 class Window:
     EDGE_WIDTH = 4
 
@@ -1689,6 +1674,8 @@ class MessageWindow(Window):
     def next(self):
         if self.hide_flag:
             self.hide()
+            self.next_flag = False
+            self.hide_flag = False
         if self.next_flag:
             self.current_page += 1
             self.current_position = 0
@@ -1906,16 +1893,15 @@ class Battle:
         self.message_window = message_window
         self.message_engine = message_engine
         self.party = party
+        self.turn = 0
         players = []
 
         for player in self.party.members:
             players.append(player)
 
-
         self.command_window = BattleCommandWindow(Rect(10, 338, 136, 136), players, self.message_engine)
 
         self.battle_status_windows = []
-
         self.battle_status_windows.append(BattleStatusWindow(50, 12, players[0], self.message_engine))
         self.battle_status_windows.append(BattleStatusWindow(210, 12, players[1], self.message_engine))
         self.battle_status_windows.append(BattleStatusWindow(370, 12, players[2], self.message_engine))
@@ -1926,6 +1912,8 @@ class Battle:
         self.enemy_status_window = None
 
         self.skill_effect = None
+        self.skill_invoke_flag = False
+
 
     def start(self, map):
         self.command_window.hide()
@@ -1944,7 +1932,7 @@ class Battle:
             battle_status_window.update()
 
         self.enemy_status_window.update()
-        pass
+
 
     def draw(self, screen):
         screen.blit(self.background_image, (0, 0))
@@ -1959,11 +1947,13 @@ class Battle:
         for battle_status_window in self.battle_status_windows:
             battle_status_window.draw(screen)
 
+
     def play_bgm(self):
         bgm_file_name = "battle.ogg"
         bgm_file_path = os.path.join("bgm", bgm_file_name)
         pygame.mixer.music.load(bgm_file_path)
         pygame.mixer.music.play(-1)
+
 
 
 class BattleCommandWindow(Window):
@@ -1974,12 +1964,10 @@ class BattleCommandWindow(Window):
     def __init__(self, rect, players, message_engine):
         Window.__init__(self, rect)
         self.command = self.BASIC
-        self.player_turn = 0
         self.text_rect = self.inner_rect.inflate(-32, -16)
         self.message_engine = message_engine
         self.cursor = load_image("data", "cursor2.png")
         self.frame = 0
-        self.turn = 0
         self.players = players
         # self.selected_player = self.players[self.page]
 
@@ -2043,6 +2031,7 @@ class BattleStatusWindow(Window):
     def update(self):
         # screen.blit(Character.images[self.player.name][1], (self.x - 24, self.y + 2))
         pass
+
 
 class EnemyStatusWindow(Window):
     X = 250
@@ -2485,7 +2474,6 @@ class PlayerStatusWindow(Window):
 
 class Skill:
 
-
     MAX_LIFE = 10
 
     def __init__(self, name, image_name, description, bonus_power, bonus_rate):
@@ -2502,6 +2490,8 @@ class Skill:
 
         self.life = 0
 
+        self.die_flag = False
+
     def draw(self, screen):
         index = (len(self.images) - 1) - int(self.life / (self.MAX_LIFE / len(self.images)))
         if index < 0:
@@ -2509,7 +2499,7 @@ class Skill:
         # print(index)
         center_rect = self.images[index].get_rect(center=SCREEN_RECT.center)
         blend_factor = self.life % (self.MAX_LIFE / len(self.images))
-        #print(blend_factor)
+        # print(blend_factor)
         if index + 1 < len(self.images):
             image = blend_image(self.images[index], self.images[index+1], blend_factor)
         else:
@@ -2517,10 +2507,15 @@ class Skill:
         screen.blit(image, center_rect)
         self.life -= 1
 
+        if self.life == 0:
+            self.die_flag = True
 
     def invoke(self):
         self.life = self.MAX_LIFE
         sounds["sword_slice"].play()
+
+    def reset(self):
+        self.die_flag = False
 
 
 class Shop:

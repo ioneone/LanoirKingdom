@@ -6,7 +6,7 @@
 # Enemy,id,level
 # CLERK,name,row,column,position,direction,move_type,message,shop_name
 
-CHARACTER,king,4,4,2,1,0,0,I'm ling
+CHARACTER,king,4,4,2,1,0,0,I'm ling%I'm happy/I'm awesome$
 CHARACTER,minister,4,4,3,1,0,1,I'm minister
 CHARACTER,soldier,4,4,4,1,0,1,I'm soldier
 CLERK,middle_male2,4,4,4,4,0,0,this is the weapon shop,wpshop
