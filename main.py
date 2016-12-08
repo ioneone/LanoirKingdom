@@ -253,6 +253,7 @@ class pyRPG:
         if event.type == KEYDOWN and event.key == K_SPACE:
             if not self.message_window.next_flag:
                 global game_state
+                self.map.play_bgm()
                 game_state = FILLED
                 self.message_window.hide()
             else:
