@@ -12,7 +12,7 @@ BAR_SIZE = 50
 DOWN, LEFT, RIGHT, UP = 0, 1, 2, 3  # in the order of the image
 STOP, AUTO_MOVE, INPUT_MOVE = 0, 1, 2
 AUTO_MOVE_RATE = 0.05  # how often NPC moves
-ENCOUNTER_RATE = 0.5  # how often the player encounter a monster
+ENCOUNTER_RATE = 0.05  # how often the player encounter a monster
 SKILL_EFFECT_SIZE = 192
 
 # game state
